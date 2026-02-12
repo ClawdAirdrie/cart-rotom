@@ -15,6 +15,9 @@ export default function Dashboard() {
     // Modal states
     const [selectedAgent, setSelectedAgent] = useState(null)
     const [modalType, setModalType] = useState(null) // 'LOGS' or 'CONFIG'
+    
+    // Group expansion state
+    const [expandedGroups, setExpandedGroups] = useState({})
 
     useEffect(() => {
         if (!currentUser) return;
@@ -86,6 +89,47 @@ export default function Dashboard() {
         }
     };
 
+    const handleDeleteGroup = async (deploymentGroupId) => {
+        if (!confirm("Are you sure you want to delete this entire group?")) return;
+        try {
+            const groupAgents = agents.filter(a => a.deploymentGroupId === deploymentGroupId);
+            for (const agent of groupAgents) {
+                await deleteDoc(doc(db, 'users', currentUser.uid, 'agents', agent.id));
+            }
+            alert(`Deleted ${groupAgents.length} agent${groupAgents.length > 1 ? 's' : ''}`);
+        } catch (err) {
+            console.error(err);
+            alert("Failed to delete group");
+        }
+    };
+
+    const toggleGroupExpanded = (groupId) => {
+        setExpandedGroups(prev => ({
+            ...prev,
+            [groupId]: !prev[groupId]
+        }));
+    };
+
+    // Group agents by deploymentGroupId
+    const groupedAgents = {};
+    const individualAgents = [];
+    
+    agents.forEach(agent => {
+        if (agent.deploymentGroupId) {
+            if (!groupedAgents[agent.deploymentGroupId]) {
+                groupedAgents[agent.deploymentGroupId] = [];
+            }
+            groupedAgents[agent.deploymentGroupId].push(agent);
+        } else {
+            individualAgents.push(agent);
+        }
+    });
+
+    // Sort agents within groups by deploymentIndex
+    Object.keys(groupedAgents).forEach(groupId => {
+        groupedAgents[groupId].sort((a, b) => (a.deploymentIndex || 0) - (b.deploymentIndex || 0));
+    });
+
     return (
         <div className="min-h-screen bg-black text-white p-8 relative overflow-hidden font-display">
             {/* Dynamic background */}
@@ -111,6 +155,13 @@ export default function Dashboard() {
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
                         Deploy Agent
                     </button>
+                    <button
+                        onClick={() => navigate('/settings')}
+                        className="bg-white/10 hover:bg-white/20 text-white font-medium px-5 py-2.5 rounded-xl transition-colors border border-white/5 font-medium backdrop-blur-md flex items-center gap-2"
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        Settings
+                    </button>
                     <button onClick={handleLogout} className="bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-xl transition-colors border border-white/5 font-medium backdrop-blur-md">
                         Logout
                     </button>
@@ -118,7 +169,16 @@ export default function Dashboard() {
             </header>
 
             <main className="relative z-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {agents.map(agent => (
+                {/* Render grouped agents */}
+                {Object.keys(groupedAgents).map(groupId => (
+                    <div key={groupId} className="group relative bg-gradient-to-br from-blue-900/20 to-purple-900/20 backdrop-blur-xl border-2 border-blue-500/30 rounded-3xl p-6 transition-all duration-300 hover:border-blue-400/50 hover:shadow-[0_20px_40px_-15px_rgba(59,130,246,0.3)] overflow-hidden">
+                        <div className="flex justify-between items-start mb-4 relative z-10">
+                            <div className="flex-1">
+                                <h3 className="font-bold text-lg text-white mb-1">
+                                    {groupedAgents[groupId][0]?.url ? new URL(groupedAgents[groupId][0].url).hostname : 'Group'} - Group Deploy
+                                </h3>
+                                <span className="inline-block bg-blue-600/30 text-blue-300 px-3 py-1 rounded-lg text-sm font-semibold border border-blue-500/40">
+                                    {groupedAgents[groupId].length} agent{groupedAgents[groupId].length > 1 ? 's' : ''}\n                                </span>\n                            </div>\n                            <button\n                                onClick={() => toggleGroupExpanded(groupId)}\n                                className=\"text-blue-400 hover:text-blue-300 transition-colors\"\n                            >\n                                <svg className={`w-6 h-6 transform transition-transform ${expandedGroups[groupId] ? 'rotate-180' : ''}`} fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path strokeLinecap=\"round\" strokeLinejoin=\"round\" strokeWidth=\"2\" d=\"M19 9l-7 7-7-7\"></path></svg>\n                            </button>\n                        </div>\n\n                        {/* Group actions */}\n                        <div className=\"flex gap-2 mb-4 flex-wrap relative z-10\">\n                            <button\n                                onClick={() => alert('Edit group settings - coming soon!')}\n                                className=\"text-xs bg-blue-600/40 hover:bg-blue-600/60 text-blue-200 px-3 py-1.5 rounded-lg border border-blue-500/30 transition-all\"\n                            >\n                                Edit Group\n                            </button>\n                            <button\n                                onClick={() => handleDeleteGroup(groupId)}\n                                className=\"text-xs bg-red-900/40 hover:bg-red-900/60 text-red-200 px-3 py-1.5 rounded-lg border border-red-500/30 transition-all\"\n                            >\n                                Delete Group\n                            </button>\n                        </div>\n\n                        {/* Expandable agent list */}\n                        {expandedGroups[groupId] && (\n                            <div className=\"space-y-2 relative z-10 mt-4 pt-4 border-t border-blue-500/20\">\n                                {groupedAgents[groupId].map((agent, idx) => (\n                                    <div key={agent.id} className=\"bg-black/30 rounded-lg p-3 border border-white/5\">\n                                        <div className=\"flex items-center justify-between mb-2\">\n                                            <div className=\"flex-1 min-w-0\">\n                                                <span className=\"text-xs font-mono text-gray-400\">Agent {idx + 1}</span>\n                                                <div className=\"flex items-center gap-2 mt-1\">\n                                                    <span className={`inline-flex items-center px-2 py-0.5 text-xs font-bold rounded ${agent.status === 'ENABLED'\n                                                            ? (agent.lastChecked ? 'bg-green-500/20 text-green-300' : 'bg-blue-500/20 text-blue-300')\n                                                            : 'bg-red-500/20 text-red-300'\n                                                        }`}>\n                                                        {agent.status}\n                                                    </span>\n                                                </div>\n                            </div>\n                                        <div className=\"flex gap-1\">\n                                            <button\n                                                onClick={() => handleOpenLogs(agent)}\n                                                className=\"text-xs bg-white/5 hover:bg-white/10 text-gray-300 px-2 py-1 rounded transition-all\"\n                                            >\n                                                Logs\n                                            </button>\n                                            <button\n                                                onClick={() => handleOpenConfig(agent)}\n                                                className=\"text-xs bg-white/5 hover:bg-white/10 text-gray-300 px-2 py-1 rounded transition-all\"\n                                            >\n                                                Configure\n                                            </button>\n                                        </div>\n                                    </div>\n                                    </div>\n                                ))}\n                            </div>\n                        )}\n                    </div>\n                ))}\n\n                {/* Render individual agents */}\n                {individualAgents.map(agent => (
                     <div key={agent.id} className="group relative bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 transition-all duration-300 hover:bg-white/10 hover:scale-[1.02] hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.5)] overflow-hidden">
 
                         {/* Thumbnail Background Effect */}

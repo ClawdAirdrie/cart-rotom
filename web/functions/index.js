@@ -1,11 +1,13 @@
 
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onCall } = require("firebase-functions/v2/https");
 const { logger } = require("firebase-functions");
 const admin = require("firebase-admin");
 const axios = require("axios");
 const cheerio = require("cheerio");
 const puppeteer = require("puppeteer-core");
 const chromium = require("@sparticuz/chromium");
+const { encryptCardData, decryptCardData } = require("./cardEncryption");
 
 
 admin.initializeApp();
@@ -177,6 +179,49 @@ async function checkStock(userId, agentId, agent) {
             }
         }
 
+        // --- AUTO CHECKOUT ---
+        // If item is in stock AND agent has auto checkout enabled with a card
+        if (isInStock && agent.autoCheckout && agent.autoCheckoutCardId) {
+            try {
+                logger.info(`Attempting auto-checkout for agent ${agentId}`);
+                
+                // Fetch and decrypt payment method
+                const paymentMethodDoc = await db.collection("users").doc(userId)
+                    .collection("paymentMethods").doc(agent.autoCheckoutCardId).get();
+                
+                if (!paymentMethodDoc.exists) {
+                    throw new Error("Payment method not found");
+                }
+                
+                const encryptedCard = paymentMethodDoc.data();
+                const cardData = decryptCardData(encryptedCard);
+                
+                // TODO: Implement actual checkout logic with Puppeteer
+                // For now, just log that we would checkout
+                logger.info(`Would checkout using card ending in ${cardData.last4}`);
+                
+                // Add checkout attempt to logs
+                await agentRef.collection("logs").add({
+                    timestamp: timestamp,
+                    result: "CHECKOUT_ATTEMPTED",
+                    message: `Auto-checkout attempted with card ending in ${cardData.last4}`,
+                    httpStatus: responseStatus
+                });
+                
+                // Mark that checkout was attempted
+                updates.lastCheckoutAttempt = timestamp;
+                
+            } catch (checkoutError) {
+                logger.error(`Auto-checkout failed for ${agentId}: ${checkoutError.message}`);
+                await agentRef.collection("logs").add({
+                    timestamp: timestamp,
+                    result: "CHECKOUT_FAILED",
+                    message: `Auto-checkout failed: ${checkoutError.message}`,
+                    httpStatus: responseStatus
+                });
+            }
+        }
+
         // Update Agent Status
         await agentRef.update(updates);
 
@@ -186,7 +231,7 @@ async function checkStock(userId, agentId, agent) {
             timestamp: timestamp,
             result: isInStock ? "IN_STOCK" : "OUT_OF_STOCK",
             message: logMessage,
-            httpStatus: response.status
+            httpStatus: responseStatus
         });
 
         logger.info(`Check complete for ${agentId}: ${isInStock ? "IN_STOCK" : "OUT_OF_STOCK"}`);

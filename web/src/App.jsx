@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import Upgrade from './pages/Upgrade';
 import DeployAgent from './pages/DeployAgent';
+import Settings from './pages/Settings';
 import './App.css';
 
 function App() {
@@ -35,6 +36,14 @@ function App() {
             element={
               <ProtectedRoute requirePayment={true}>
                 <DeployAgent />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute requirePayment={true}>
+                <Settings />
               </ProtectedRoute>
             }
           />
