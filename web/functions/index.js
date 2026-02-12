@@ -7,11 +7,133 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 const puppeteer = require("puppeteer-core");
 const chromium = require("@sparticuz/chromium");
-const { encryptCardData, decryptCardData } = require("./cardEncryption");
+const { encryptCardData, decryptCardData, encrypt, decrypt } = require("./cardEncryption");
 
 
 admin.initializeApp();
 const db = admin.firestore();
+
+// Helper function to detect webhook type from URL
+function detectWebhookType(url) {
+    if (url.includes('discord.com/api/webhooks')) return 'discord';
+    if (url.includes('hooks.slack.com')) return 'slack';
+    return 'generic';
+}
+
+// Fire webhook notification
+async function fireWebhook(userId, agentId, agent, isInStock) {
+    try {
+        // Fetch user's webhook URL
+        const userDoc = await db.collection('users').doc(userId).get();
+        if (!userDoc.exists) return;
+
+        const webhookUrl = userDoc.data().notificationWebhook;
+        if (!webhookUrl) return;
+
+        const webhookType = detectWebhookType(webhookUrl);
+        const timestamp = new Date().toISOString();
+        const status = isInStock ? 'IN STOCK' : 'OUT OF STOCK';
+        const color = isInStock ? 0x00ff00 : 0xff0000; // Green for in stock, red for out of stock
+
+        let payload;
+
+        if (webhookType === 'discord') {
+            payload = {
+                embeds: [{
+                    title: agent.alias || agent.name || 'Stock Alert',
+                    url: agent.url,
+                    color: color,
+                    thumbnail: agent.thumbnail ? { url: agent.thumbnail } : undefined,
+                    fields: [
+                        {
+                            name: 'Status',
+                            value: status,
+                            inline: true
+                        },
+                        {
+                            name: 'Last Check',
+                            value: new Date().toLocaleString(),
+                            inline: true
+                        },
+                        {
+                            name: 'URL',
+                            value: agent.url,
+                            inline: false
+                        }
+                    ],
+                    footer: {
+                        text: 'Cart Rotom Stock Monitor'
+                    },
+                    timestamp: timestamp
+                }]
+            };
+        } else if (webhookType === 'slack') {
+            const colorStr = isInStock ? 'good' : 'danger';
+            payload = {
+                attachments: [{
+                    color: colorStr,
+                    blocks: [
+                        {
+                            type: 'header',
+                            text: {
+                                type: 'plain_text',
+                                text: agent.alias || agent.name || 'Stock Alert',
+                                emoji: true
+                            }
+                        },
+                        ...(agent.thumbnail ? [{
+                            type: 'image',
+                            image_url: agent.thumbnail,
+                            alt_text: 'Product Image'
+                        }] : []),
+                        {
+                            type: 'section',
+                            fields: [
+                                {
+                                    type: 'mrkdwn',
+                                    text: `*Status:*\n${status}`
+                                },
+                                {
+                                    type: 'mrkdwn',
+                                    text: `*Last Check:*\n${new Date().toLocaleString()}`
+                                },
+                                {
+                                    type: 'mrkdwn',
+                                    text: `*URL:*\n<${agent.url}|View Product>`
+                                }
+                            ]
+                        }
+                    ]
+                }]
+            };
+        } else {
+            // Generic JSON payload
+            payload = {
+                agentId: agentId,
+                agentName: agent.alias || agent.name,
+                url: agent.url,
+                thumbnail: agent.thumbnail,
+                status: status,
+                isInStock: isInStock,
+                timestamp: timestamp,
+                lastChecked: new Date().toLocaleString()
+            };
+        }
+
+        // Send webhook
+        await axios.post(webhookUrl, payload, {
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            timeout: 10000
+        });
+
+        logger.info(`Webhook fired successfully for agent ${agentId}`);
+    } catch (error) {
+        logger.error(`Failed to fire webhook for agent ${agentId}: ${error.message}`);
+        // Don't throw - webhook failure shouldn't break stock checking
+    }
+}
 
 exports.scheduleAgentChecks = onSchedule({
     schedule: "every 1 minutes",
@@ -222,19 +344,34 @@ async function checkStock(userId, agentId, agent) {
             }
         }
 
+        // Check if status changed
+        const currentStatus = isInStock ? "IN_STOCK" : "OUT_OF_STOCK";
+        const previousStatus = agent.lastResult;
+        const statusChanged = previousStatus && previousStatus !== currentStatus;
+
         // Update Agent Status
         await agentRef.update(updates);
 
+        // Fire webhook if status changed or first time check
+        if (!previousStatus || statusChanged) {
+            await fireWebhook(userId, agentId, agent, isInStock);
+        }
+
         // Log the result
-        // Only log if status CHANGED or it's been a while? For now log every check for transparency.
         await agentRef.collection("logs").add({
             timestamp: timestamp,
-            result: isInStock ? "IN_STOCK" : "OUT_OF_STOCK",
+            result: currentStatus,
             message: logMessage,
             httpStatus: responseStatus
         });
 
-        logger.info(`Check complete for ${agentId}: ${isInStock ? "IN_STOCK" : "OUT_OF_STOCK"}`);
+        logger.info(`Check complete for ${agentId}: ${currentStatus}`);
+
+        // Fire webhook if status changed
+        if (statusChanged) {
+            logger.info(`Status changed for ${agentId}: ${previousStatus} → ${currentStatus}`);
+            await fireWebhook(userId, agentId, agent, isInStock);
+        }
 
     } catch (error) {
         logger.error(`Failed to check url ${agent.url}: ${error.message}`);
@@ -284,3 +421,399 @@ async function fetchWithPuppeteer(url) {
         await browser.close();
     }
 }
+
+// ============================================
+// WEBHOOK FUNCTIONS
+// ============================================
+
+/**
+ * Fire webhook notification
+ * @param {string} userId - User ID
+ * @param {string} agentId - Agent ID
+ * @param {object} agent - Agent data
+ * @param {boolean} isInStock - Current stock status
+ */
+async function fireWebhook(userId, agentId, agent, isInStock) {
+    try {
+        // Fetch user's webhook URL
+        const userDoc = await db.collection("users").doc(userId).get();
+        
+        if (!userDoc.exists) {
+            logger.warn(`User ${userId} not found for webhook`);
+            return;
+        }
+
+        const userData = userDoc.data();
+        let webhookUrl = userData.notificationWebhook;
+
+        // Check for per-agent webhook override (future feature)
+        if (agent.webhookUrl) {
+            webhookUrl = agent.webhookUrl;
+        }
+
+        if (!webhookUrl) {
+            logger.info(`No webhook configured for user ${userId}`);
+            return;
+        }
+
+        // Decrypt webhook URL
+        const decryptedWebhookUrl = decrypt(webhookUrl);
+
+        // Detect webhook type
+        const webhookType = detectWebhookType(decryptedWebhookUrl);
+        
+        // Build payload based on webhook type
+        let payload;
+        const status = isInStock ? "IN_STOCK" : "OUT_OF_STOCK";
+        const color = isInStock ? 0x00ff00 : 0xff0000; // Green for in stock, red for out of stock
+        const statusText = isInStock ? "✅ IN STOCK" : "❌ OUT OF STOCK";
+        const title = agent.alias || agent.name || "Product";
+
+        if (webhookType === 'discord') {
+            // Discord webhook format with embeds
+            payload = {
+                embeds: [{
+                    title: title,
+                    url: agent.url,
+                    description: `Status: **${statusText}**`,
+                    color: color,
+                    thumbnail: agent.thumbnail ? { url: agent.thumbnail } : undefined,
+                    fields: [
+                        {
+                            name: "URL",
+                            value: agent.url,
+                            inline: false
+                        },
+                        {
+                            name: "Last Checked",
+                            value: new Date().toLocaleString(),
+                            inline: true
+                        }
+                    ],
+                    footer: {
+                        text: "Cart Rotom Stock Alert"
+                    },
+                    timestamp: new Date().toISOString()
+                }]
+            };
+        } else if (webhookType === 'slack') {
+            // Slack webhook format with blocks
+            const blocks = [
+                {
+                    type: "header",
+                    text: {
+                        type: "plain_text",
+                        text: `${statusText}: ${title}`,
+                        emoji: true
+                    }
+                },
+                {
+                    type: "section",
+                    text: {
+                        type: "mrkdwn",
+                        text: `*Product:* ${title}\n*Status:* ${statusText}\n*URL:* <${agent.url}|View Product>`
+                    }
+                }
+            ];
+
+            if (agent.thumbnail) {
+                blocks[1].accessory = {
+                    type: "image",
+                    image_url: agent.thumbnail,
+                    alt_text: title
+                };
+            }
+
+            blocks.push({
+                type: "context",
+                elements: [
+                    {
+                        type: "mrkdwn",
+                        text: `Last checked: ${new Date().toLocaleString()}`
+                    }
+                ]
+            });
+
+            payload = {
+                blocks: blocks,
+                attachments: [{
+                    color: isInStock ? "good" : "danger"
+                }]
+            };
+        } else {
+            // Generic JSON webhook
+            payload = {
+                agent: {
+                    id: agentId,
+                    name: title,
+                    alias: agent.alias,
+                    url: agent.url,
+                    thumbnail: agent.thumbnail
+                },
+                status: status,
+                isInStock: isInStock,
+                timestamp: new Date().toISOString(),
+                message: `${title} is now ${statusText}`
+            };
+        }
+
+        // Send webhook
+        await axios.post(decryptedWebhookUrl, payload, {
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            timeout: 5000
+        });
+
+        logger.info(`Webhook fired successfully for agent ${agentId} (${webhookType})`);
+
+    } catch (error) {
+        // Don't fail the agent check if webhook fails
+        logger.error(`Webhook failed for agent ${agentId}: ${error.message}`);
+    }
+}
+
+/**
+ * Detect webhook type from URL
+ * @param {string} url - Webhook URL
+ * @returns {string} - Webhook type (discord, slack, generic)
+ */
+function detectWebhookType(url) {
+    if (!url) return 'generic';
+    if (url.includes('discord.com')) return 'discord';
+    if (url.includes('hooks.slack.com')) return 'slack';
+    return 'generic';
+}
+
+/**
+ * Save webhook URL (callable function)
+ */
+exports.saveWebhook = onCall(async (request) => {
+    const { auth, data } = request;
+    
+    if (!auth) {
+        throw new Error("Unauthorized");
+    }
+
+    const { webhookUrl } = data;
+    const userId = auth.uid;
+
+    try {
+        // Encrypt webhook URL
+        const encryptedWebhookUrl = webhookUrl ? encrypt(webhookUrl) : null;
+
+        // Save to Firestore
+        await db.collection("users").doc(userId).set({
+            notificationWebhook: encryptedWebhookUrl,
+            updatedAt: admin.firestore.Timestamp.now()
+        }, { merge: true });
+
+        logger.info(`Webhook URL saved for user ${userId}`);
+
+        return { success: true, message: "Webhook URL saved successfully" };
+    } catch (error) {
+        logger.error(`Failed to save webhook URL for user ${userId}: ${error.message}`);
+        throw new Error("Failed to save webhook URL");
+    }
+});
+
+/**
+ * Test webhook (callable function)
+ */
+exports.testWebhook = onCall(async (request) => {
+    const { auth, data } = request;
+    
+    if (!auth) {
+        throw new Error("Unauthorized");
+    }
+
+    const { webhookUrl } = data;
+    const userId = auth.uid;
+
+    try {
+        // Detect webhook type
+        const webhookType = detectWebhookType(webhookUrl);
+
+        // Build test payload
+        let payload;
+        if (webhookType === 'discord') {
+            payload = {
+                embeds: [{
+                    title: "🧪 Test Notification",
+                    description: "Your Cart Rotom webhook is working perfectly!",
+                    color: 0x00aaff,
+                    fields: [
+                        {
+                            name: "Status",
+                            value: "✅ Connected",
+                            inline: true
+                        },
+                        {
+                            name: "Type",
+                            value: "Discord Webhook",
+                            inline: true
+                        }
+                    ],
+                    footer: {
+                        text: "Cart Rotom Stock Alert"
+                    },
+                    timestamp: new Date().toISOString()
+                }]
+            };
+        } else if (webhookType === 'slack') {
+            payload = {
+                blocks: [
+                    {
+                        type: "header",
+                        text: {
+                            type: "plain_text",
+                            text: "🧪 Test Notification",
+                            emoji: true
+                        }
+                    },
+                    {
+                        type: "section",
+                        text: {
+                            type: "mrkdwn",
+                            text: "*Your Cart Rotom webhook is working perfectly!*\n\n✅ Status: Connected\n🔔 Type: Slack Webhook"
+                        }
+                    }
+                ],
+                attachments: [{
+                    color: "good"
+                }]
+            };
+        } else {
+            payload = {
+                test: true,
+                message: "Your Cart Rotom webhook is working perfectly!",
+                status: "connected",
+                type: "generic webhook",
+                timestamp: new Date().toISOString()
+            };
+        }
+
+        // Send test webhook
+        await axios.post(webhookUrl, payload, {
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            timeout: 5000
+        });
+
+        logger.info(`Test webhook sent successfully for user ${userId} (${webhookType})`);
+
+        return { 
+            success: true, 
+            message: "Test notification sent successfully",
+            type: webhookType 
+        };
+    } catch (error) {
+        logger.error(`Test webhook failed for user ${userId}: ${error.message}`);
+        throw new Error(`Failed to send test notification: ${error.message}`);
+    }
+});
+
+// ============================================
+// PAYMENT METHOD FUNCTIONS
+// ============================================
+
+/**
+ * Add payment method (callable function)
+ */
+exports.addPaymentMethod = onCall(async (request) => {
+    const { auth, data } = request;
+    
+    if (!auth) {
+        throw new Error("Unauthorized");
+    }
+
+    const { cardNumber, cvc, expiry, cardholderName, last4, isPrepaid, balance } = data;
+    const userId = auth.uid;
+
+    try {
+        // Encrypt card data
+        const encryptedCard = encryptCardData({
+            cardNumber,
+            cvc,
+            expiry,
+            cardholderName,
+            last4,
+            isPrepaid,
+            balance
+        });
+
+        // Save to Firestore
+        await db.collection("users").doc(userId).collection("paymentMethods").add({
+            ...encryptedCard,
+            createdAt: admin.firestore.Timestamp.now(),
+            updatedAt: admin.firestore.Timestamp.now()
+        });
+
+        logger.info(`Payment method added for user ${userId}`);
+
+        return { success: true, message: "Payment method added successfully" };
+    } catch (error) {
+        logger.error(`Failed to add payment method for user ${userId}: ${error.message}`);
+        throw new Error("Failed to add payment method");
+    }
+});
+
+/**
+ * Update payment method (callable function)
+ */
+exports.updatePaymentMethod = onCall(async (request) => {
+    const { auth, data } = request;
+    
+    if (!auth) {
+        throw new Error("Unauthorized");
+    }
+
+    const { methodId, cardNumber, cvc, expiry, cardholderName, last4, isPrepaid, balance } = data;
+    const userId = auth.uid;
+
+    try {
+        // Verify ownership
+        const methodRef = db.collection("users").doc(userId).collection("paymentMethods").doc(methodId);
+        const methodDoc = await methodRef.get();
+
+        if (!methodDoc.exists) {
+            throw new Error("Payment method not found");
+        }
+
+        // Prepare update data
+        const updateData = {
+            expiry,
+            cardholderName,
+            isPrepaid,
+            balance: isPrepaid ? balance : null,
+            updatedAt: admin.firestore.Timestamp.now()
+        };
+
+        // If new card number or CVC provided, encrypt them
+        if (cardNumber && cvc) {
+            const encryptedCard = encryptCardData({
+                cardNumber,
+                cvc,
+                expiry,
+                cardholderName,
+                last4,
+                isPrepaid,
+                balance
+            });
+            updateData.encryptedNumber = encryptedCard.encryptedNumber;
+            updateData.encryptedCVC = encryptedCard.encryptedCVC;
+            updateData.last4 = encryptedCard.last4;
+        }
+
+        // Update in Firestore
+        await methodRef.update(updateData);
+
+        logger.info(`Payment method updated for user ${userId}`);
+
+        return { success: true, message: "Payment method updated successfully" };
+    } catch (error) {
+        logger.error(`Failed to update payment method for user ${userId}: ${error.message}`);
+        throw new Error("Failed to update payment method");
+    }
+});

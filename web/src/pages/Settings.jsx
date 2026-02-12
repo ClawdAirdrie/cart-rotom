@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebase';
-import { collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
 export default function Settings() {
@@ -24,6 +24,13 @@ export default function Settings() {
     
     // Camera scan state
     const [isScanning, setIsScanning] = useState(false);
+    
+    // Notifications state
+    const [activeTab, setActiveTab] = useState('payment'); // 'payment' or 'notifications'
+    const [webhookUrl, setWebhookUrl] = useState('');
+    const [webhookType, setWebhookType] = useState('');
+    const [testingWebhook, setTestingWebhook] = useState(false);
+    const [savingWebhook, setSavingWebhook] = useState(false);
 
     // Fetch payment methods
     useEffect(() => {
@@ -46,6 +53,50 @@ export default function Settings() {
 
         return unsubscribe;
     }, [currentUser]);
+
+    // Fetch webhook URL
+    useEffect(() => {
+        if (!currentUser) return;
+
+        const userRef = doc(db, 'users', currentUser.uid);
+        const unsubscribe = onSnapshot(userRef, (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.data();
+                setWebhookUrl(data.notificationWebhook || '');
+                detectWebhookType(data.notificationWebhook || '');
+            }
+        }, (error) => {
+            console.error("Error fetching webhook:", error);
+        });
+
+        return unsubscribe;
+    }, [currentUser]);
+
+    // Fetch webhook settings
+    useEffect(() => {
+        if (!currentUser) return;
+
+        const userRef = doc(db, 'users', currentUser.uid);
+        const unsubscribe = onSnapshot(userRef, (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.data();
+                setWebhookUrl(data.notificationWebhook || '');
+                setWebhookType(detectWebhookType(data.notificationWebhook || ''));
+            }
+        }, (error) => {
+            console.error("Error fetching webhook settings:", error);
+        });
+
+        return unsubscribe;
+    }, [currentUser]);
+
+    // Detect webhook type from URL
+    const detectWebhookType = (url) => {
+        if (!url) return '';
+        if (url.includes('discord.com')) return 'Discord';
+        if (url.includes('hooks.slack.com')) return 'Slack';
+        return 'Generic';
+    };
 
     const handleSaveCard = async (e) => {
         e.preventDefault();
@@ -133,6 +184,145 @@ export default function Settings() {
         setIsScanning(!isScanning);
     };
 
+    // Detect webhook type from URL
+    const detectWebhookType = (url) => {
+        if (!url) {
+            setWebhookType('');
+            return;
+        }
+        if (url.includes('discord.com/api/webhooks')) {
+            setWebhookType('Discord');
+        } else if (url.includes('hooks.slack.com')) {
+            setWebhookType('Slack');
+        } else {
+            setWebhookType('Generic');
+        }
+    };
+
+    // Handle webhook URL change
+    const handleWebhookUrlChange = (value) => {
+        setWebhookUrl(value);
+        detectWebhookType(value);
+    };
+
+    // Save webhook URL
+    const handleSaveWebhook = async (e) => {
+        if (e) e.preventDefault();
+        
+        if (!webhookUrl.trim()) {
+            alert('Please enter a webhook URL');
+            return;
+        }
+
+        // Basic URL validation
+        try {
+            new URL(webhookUrl);
+        } catch {
+            alert('Please enter a valid URL');
+            return;
+        }
+
+        setSavingWebhook(true);
+        try {
+            await updateDoc(doc(db, 'users', currentUser.uid), {
+                notificationWebhook: webhookUrl.trim()
+            });
+            alert('Webhook saved successfully!');
+        } catch (err) {
+            console.error(err);
+            alert('Failed to save webhook: ' + err.message);
+        } finally {
+            setSavingWebhook(false);
+        }
+    };
+
+    // Test webhook
+    const handleTestWebhook = async () => {
+        if (!webhookUrl.trim()) {
+            alert('Please enter a webhook URL');
+            return;
+        }
+
+        setTestingWebhook(true);
+        try {
+            const functions = getFunctions();
+            const testWebhook = httpsCallable(functions, 'testWebhook');
+            const result = await testWebhook({ webhookUrl: webhookUrl.trim() });
+            
+            if (result.data.success) {
+                alert('Test notification sent successfully! Check your webhook destination.');
+            } else {
+                alert('Failed to send test notification: ' + (result.data.error || 'Unknown error'));
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Failed to test webhook: ' + err.message);
+        } finally {
+            setTestingWebhook(false);
+        }
+    };
+
+    // Clear webhook URL
+    const handleClearWebhook = async () => {
+        if (!confirm('Are you sure you want to remove the webhook URL?')) return;
+
+        setSavingWebhook(true);
+        try {
+            await updateDoc(doc(db, 'users', currentUser.uid), {
+                notificationWebhook: ''
+            });
+            setWebhookUrl('');
+            setWebhookType('');
+            alert('Webhook removed successfully!');
+        } catch (err) {
+            console.error(err);
+            alert('Failed to remove webhook: ' + err.message);
+        } finally {
+            setSavingWebhook(false);
+        }
+    };
+
+    const handleSaveWebhook = async (e) => {
+        e.preventDefault();
+        setSavingWebhook(true);
+
+        try {
+            const functions = getFunctions();
+            const saveWebhook = httpsCallable(functions, 'saveWebhook');
+            
+            await saveWebhook({ webhookUrl });
+            alert('Webhook URL saved successfully!');
+            setWebhookType(detectWebhookType(webhookUrl));
+        } catch (err) {
+            console.error(err);
+            alert('Failed to save webhook: ' + err.message);
+        } finally {
+            setSavingWebhook(false);
+        }
+    };
+
+    const handleTestWebhook = async () => {
+        if (!webhookUrl) {
+            alert('Please enter a webhook URL first');
+            return;
+        }
+
+        setTestingWebhook(true);
+
+        try {
+            const functions = getFunctions();
+            const testWebhook = httpsCallable(functions, 'testWebhook');
+            
+            await testWebhook({ webhookUrl });
+            alert('Test notification sent! Check your channel.');
+        } catch (err) {
+            console.error(err);
+            alert('Failed to send test notification: ' + err.message);
+        } finally {
+            setTestingWebhook(false);
+        }
+    };
+
     // Format card number with spaces
     const formatCardNumber = (value) => {
         const v = value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
@@ -168,26 +358,61 @@ export default function Settings() {
                 <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-900/30 rounded-full blur-[120px]"></div>
             </div>
 
-            <header className="relative z-10 mb-12 flex justify-between items-center bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 shadow-2xl">
-                <div>
-                    <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">
-                        Payment Settings
-                    </h1>
-                    <p className="text-gray-400 text-sm mt-1 font-medium tracking-wide">
-                        Manage your payment methods for auto-checkout
-                    </p>
+            <header className="relative z-10 mb-12 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl">
+                <div className="flex justify-between items-center p-6 border-b border-white/10">
+                    <div>
+                        <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">
+                            Settings
+                        </h1>
+                        <p className="text-gray-400 text-sm mt-1 font-medium tracking-wide">
+                            Manage your payment methods and notifications
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => navigate('/')}
+                        className="bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-xl transition-colors border border-white/5 font-medium backdrop-blur-md"
+                    >
+                        Back to Dashboard
+                    </button>
                 </div>
-                <button
-                    onClick={() => navigate('/')}
-                    className="bg-white/10 hover:bg-white/20 text-white px-5 py-2.5 rounded-xl transition-colors border border-white/5 font-medium backdrop-blur-md"
-                >
-                    Back to Dashboard
-                </button>
+                
+                {/* Tab Navigation */}
+                <div className="flex gap-2 p-4">
+                    <button
+                        onClick={() => setActiveTab('payment')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+                            activeTab === 'payment' 
+                                ? 'bg-blue-600 text-white' 
+                                : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                        }`}
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
+                        </svg>
+                        Payment Methods
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('notifications')}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+                            activeTab === 'notifications' 
+                                ? 'bg-blue-600 text-white' 
+                                : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                        }`}
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+                        </svg>
+                        Notifications
+                    </button>
+                </div>
             </header>
 
             <main className="relative z-10 max-w-4xl mx-auto">
-                {/* Warning Banner */}
-                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-4 mb-6 flex items-start gap-3">
+                {/* Payment Methods Tab */}
+                {activeTab === 'payment' && (
+                    <>
+                        {/* Warning Banner */}
+                        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-4 mb-6 flex items-start gap-3">
                     <svg className="w-6 h-6 text-yellow-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
                     </svg>
@@ -421,6 +646,124 @@ export default function Settings() {
                         ))
                     )}
                 </div>
+                    </>
+                )}
+
+                {/* Notifications Tab */}
+                {activeTab === 'notifications' && (
+                    <>
+                        {/* Info Banner */}
+                        <div className="bg-blue-500/10 border border-blue-500/30 rounded-2xl p-4 mb-6 flex items-start gap-3">
+                            <svg className="w-6 h-6 text-blue-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <div>
+                                <h3 className="font-bold text-blue-200 mb-1">Webhook Notifications</h3>
+                                <p className="text-blue-300/80 text-sm">
+                                    Get notified when items go in or out of stock. Supports Discord webhooks, Slack webhooks, and generic JSON webhooks.
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Webhook Configuration */}
+                        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 mb-6">
+                            <h2 className="text-xl font-bold text-white mb-6">Webhook Configuration</h2>
+                            
+                            <form onSubmit={handleSaveWebhook} className="space-y-6">
+                                <div>
+                                    <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">
+                                        Webhook URL
+                                    </label>
+                                    <input
+                                        type="url"
+                                        value={webhookUrl}
+                                        onChange={(e) => handleWebhookUrlChange(e.target.value)}
+                                        placeholder="https://discord.com/api/webhooks/... or https://hooks.slack.com/..."
+                                        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                    />
+                                    {webhookType && (
+                                        <p className="text-sm text-gray-400 mt-2 flex items-center gap-2">
+                                            <span className="inline-flex items-center px-2 py-1 rounded-lg bg-green-500/20 text-green-300 text-xs font-medium">
+                                                {webhookType}
+                                            </span>
+                                            Webhook type detected
+                                        </p>
+                                    )}
+                                </div>
+
+                                <div className="flex gap-3">
+                                    <button
+                                        type="submit"
+                                        disabled={savingWebhook || !webhookUrl}
+                                        className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all"
+                                    >
+                                        {savingWebhook ? 'Saving...' : 'Save Webhook'}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleTestWebhook}
+                                        disabled={testingWebhook || !webhookUrl}
+                                        className="bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-bold py-3 px-6 rounded-xl transition-all"
+                                    >
+                                        {testingWebhook ? 'Testing...' : 'Test Webhook'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+
+                        {/* Webhook Examples */}
+                        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+                            <h3 className="text-lg font-bold text-white mb-4">Supported Webhook Types</h3>
+                            
+                            <div className="space-y-4">
+                                <div className="bg-black/30 rounded-xl p-4">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">
+                                            D
+                                        </div>
+                                        <h4 className="font-bold text-white">Discord</h4>
+                                    </div>
+                                    <p className="text-gray-400 text-sm mb-2">
+                                        Create a webhook in your Discord server settings → Integrations → Webhooks
+                                    </p>
+                                    <code className="text-xs text-gray-500 bg-black/50 px-2 py-1 rounded">
+                                        https://discord.com/api/webhooks/...
+                                    </code>
+                                </div>
+
+                                <div className="bg-black/30 rounded-xl p-4">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <div className="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">
+                                            S
+                                        </div>
+                                        <h4 className="font-bold text-white">Slack</h4>
+                                    </div>
+                                    <p className="text-gray-400 text-sm mb-2">
+                                        Create an incoming webhook in your Slack workspace settings
+                                    </p>
+                                    <code className="text-xs text-gray-500 bg-black/50 px-2 py-1 rounded">
+                                        https://hooks.slack.com/services/...
+                                    </code>
+                                </div>
+
+                                <div className="bg-black/30 rounded-xl p-4">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <div className="w-8 h-8 bg-gray-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">
+                                            ⚙️
+                                        </div>
+                                        <h4 className="font-bold text-white">Generic JSON</h4>
+                                    </div>
+                                    <p className="text-gray-400 text-sm mb-2">
+                                        Any endpoint that accepts POST requests with JSON payloads
+                                    </p>
+                                    <code className="text-xs text-gray-500 bg-black/50 px-2 py-1 rounded">
+                                        https://your-api.com/webhook
+                                    </code>
+                                </div>
+                            </div>
+                        </div>
+                    </>
+                )}
             </main>
         </div>
     );
