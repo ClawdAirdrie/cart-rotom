@@ -1,5 +1,7 @@
 # Cart Rotom
 
+> **Note:** This README was modified by **Clawd** (an AI assistant) on 2026-02-12 as a test of automated PR workflows with OpenClaw.
+
 Cart Rotom is an agent-based stock monitoring system with a React frontend and Firebase backend. It allows users to deploy monitoring agents to track product availability and manage subscriptions via Stripe.
 
 ## Prerequisites
