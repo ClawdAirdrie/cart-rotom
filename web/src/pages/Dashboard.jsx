@@ -178,7 +178,71 @@ export default function Dashboard() {
                                     {groupedAgents[groupId][0]?.url ? new URL(groupedAgents[groupId][0].url).hostname : 'Group'} - Group Deploy
                                 </h3>
                                 <span className="inline-block bg-blue-600/30 text-blue-300 px-3 py-1 rounded-lg text-sm font-semibold border border-blue-500/40">
-                                    {groupedAgents[groupId].length} agent{groupedAgents[groupId].length > 1 ? 's' : ''}\n                                </span>\n                            </div>\n                            <button\n                                onClick={() => toggleGroupExpanded(groupId)}\n                                className=\"text-blue-400 hover:text-blue-300 transition-colors\"\n                            >\n                                <svg className={`w-6 h-6 transform transition-transform ${expandedGroups[groupId] ? 'rotate-180' : ''}`} fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path strokeLinecap=\"round\" strokeLinejoin=\"round\" strokeWidth=\"2\" d=\"M19 9l-7 7-7-7\"></path></svg>\n                            </button>\n                        </div>\n\n                        {/* Group actions */}\n                        <div className=\"flex gap-2 mb-4 flex-wrap relative z-10\">\n                            <button\n                                onClick={() => alert('Edit group settings - coming soon!')}\n                                className=\"text-xs bg-blue-600/40 hover:bg-blue-600/60 text-blue-200 px-3 py-1.5 rounded-lg border border-blue-500/30 transition-all\"\n                            >\n                                Edit Group\n                            </button>\n                            <button\n                                onClick={() => handleDeleteGroup(groupId)}\n                                className=\"text-xs bg-red-900/40 hover:bg-red-900/60 text-red-200 px-3 py-1.5 rounded-lg border border-red-500/30 transition-all\"\n                            >\n                                Delete Group\n                            </button>\n                        </div>\n\n                        {/* Expandable agent list */}\n                        {expandedGroups[groupId] && (\n                            <div className=\"space-y-2 relative z-10 mt-4 pt-4 border-t border-blue-500/20\">\n                                {groupedAgents[groupId].map((agent, idx) => (\n                                    <div key={agent.id} className=\"bg-black/30 rounded-lg p-3 border border-white/5\">\n                                        <div className=\"flex items-center justify-between mb-2\">\n                                            <div className=\"flex-1 min-w-0\">\n                                                <span className=\"text-xs font-mono text-gray-400\">Agent {idx + 1}</span>\n                                                <div className=\"flex items-center gap-2 mt-1\">\n                                                    <span className={`inline-flex items-center px-2 py-0.5 text-xs font-bold rounded ${agent.status === 'ENABLED'\n                                                            ? (agent.lastChecked ? 'bg-green-500/20 text-green-300' : 'bg-blue-500/20 text-blue-300')\n                                                            : 'bg-red-500/20 text-red-300'\n                                                        }`}>\n                                                        {agent.status}\n                                                    </span>\n                                                </div>\n                            </div>\n                                        <div className=\"flex gap-1\">\n                                            <button\n                                                onClick={() => handleOpenLogs(agent)}\n                                                className=\"text-xs bg-white/5 hover:bg-white/10 text-gray-300 px-2 py-1 rounded transition-all\"\n                                            >\n                                                Logs\n                                            </button>\n                                            <button\n                                                onClick={() => handleOpenConfig(agent)}\n                                                className=\"text-xs bg-white/5 hover:bg-white/10 text-gray-300 px-2 py-1 rounded transition-all\"\n                                            >\n                                                Configure\n                                            </button>\n                                        </div>\n                                    </div>\n                                    </div>\n                                ))}\n                            </div>\n                        )}\n                    </div>\n                ))}\n\n                {/* Render individual agents */}\n                {individualAgents.map(agent => (
+                                    {groupedAgents[groupId].length} agent{groupedAgents[groupId].length > 1 ? 's' : ''}
+                                </span>
+                            </div>
+                            <button
+                                onClick={() => toggleGroupExpanded(groupId)}
+                                className="text-blue-400 hover:text-blue-300 transition-colors"
+                            >
+                                <svg className={`w-6 h-6 transform transition-transform ${expandedGroups[groupId] ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                            </button>
+                        </div>
+
+                        {/* Group actions */}
+                        <div className="flex gap-2 mb-4 flex-wrap relative z-10">
+                            <button
+                                onClick={() => alert('Edit group settings - coming soon!')}
+                                className="text-xs bg-blue-600/40 hover:bg-blue-600/60 text-blue-200 px-3 py-1.5 rounded-lg border border-blue-500/30 transition-all"
+                            >
+                                Edit Group
+                            </button>
+                            <button
+                                onClick={() => handleDeleteGroup(groupId)}
+                                className="text-xs bg-red-900/40 hover:bg-red-900/60 text-red-200 px-3 py-1.5 rounded-lg border border-red-500/30 transition-all"
+                            >
+                                Delete Group
+                            </button>
+                        </div>
+
+                        {/* Expandable agent list */}
+                        {expandedGroups[groupId] && (
+                            <div className="space-y-2 relative z-10 mt-4 pt-4 border-t border-blue-500/20">
+                                {groupedAgents[groupId].map((agent, idx) => (
+                                    <div key={agent.id} className="bg-black/30 rounded-lg p-3 border border-white/5">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div className="flex-1 min-w-0">
+                                                <span className="text-xs font-mono text-gray-400">Agent {idx + 1}</span>
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <span className={`inline-flex items-center px-2 py-0.5 text-xs font-bold rounded ${agent.status === 'ENABLED'
+                                                            ? (agent.lastChecked ? 'bg-green-500/20 text-green-300' : 'bg-blue-500/20 text-blue-300')
+                                                            : 'bg-red-500/20 text-red-300'
+                                                        }`}>
+                                                        {agent.status}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-1">
+                                                <button
+                                                    onClick={() => handleOpenLogs(agent)}
+                                                    className="text-xs bg-white/5 hover:bg-white/10 text-gray-300 px-2 py-1 rounded transition-all"
+                                                >
+                                                    Logs
+                                                </button>
+                                                <button
+                                                    onClick={() => handleOpenConfig(agent)}
+                                                    className="text-xs bg-white/5 hover:bg-white/10 text-gray-300 px-2 py-1 rounded transition-all"
+                                                >
+                                                    Configure
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                ))}\n\n                {/* Render individual agents */}\n                {individualAgents.map(agent => (
                     <div key={agent.id} className="group relative bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 transition-all duration-300 hover:bg-white/10 hover:scale-[1.02] hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.5)] overflow-hidden">
 
                         {/* Thumbnail Background Effect */}
