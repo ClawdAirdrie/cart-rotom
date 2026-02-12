@@ -1,8 +1,7 @@
-
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auth, db } from '../firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, writeBatch, doc } from 'firebase/firestore';
 
 export default function DeployAgent() {
     const navigate = useNavigate();
@@ -12,6 +11,10 @@ export default function DeployAgent() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
+    // Mass deploy toggle
+    const [deployMode, setDeployMode] = useState('SINGLE'); // 'SINGLE' or 'MULTIPLE'
+    const [numAgents, setNumAgents] = useState(1);
+
     // Advanced Settings
     const [checkType, setCheckType] = useState('KEYWORD_MISSING'); // KEYWORD_MISSING, KEYWORD_PRESENT, SELECTOR
     const [keywords, setKeywords] = useState('');
@@ -20,6 +23,14 @@ export default function DeployAgent() {
     const [expectedValue, setExpectedValue] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [autoCheckout, setAutoCheckout] = useState(false);
+
+    const generateUUID = () => {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -40,12 +51,12 @@ export default function DeployAgent() {
                 return;
             }
 
-            // Construct payload based on check type
-            const payload = {
+            // Construct base payload
+            const basePayload = {
                 url,
-                alias: alias || new URL(url).hostname, // Use alias if provided, fallback to hostname
+                alias: alias || new URL(url).hostname,
                 frequency: parseInt(frequency),
-                status: 'ENABLED', // Defaults to ENABLED now
+                status: 'ENABLED',
                 createdAt: serverTimestamp(),
                 lastChecked: null,
                 name: new URL(url).hostname,
@@ -54,18 +65,41 @@ export default function DeployAgent() {
             };
 
             if (checkType === 'SELECTOR') {
-                payload.selector = selector;
-                payload.condition = condition;
-                payload.expectedValue = expectedValue;
+                basePayload.selector = selector;
+                basePayload.condition = condition;
+                basePayload.expectedValue = expectedValue;
                 if (!selector) throw new Error("CSS Selector is required for Selector check type");
             } else {
-                // Keywords
-                payload.keywords = keywords;
+                basePayload.keywords = keywords;
             }
 
-            await addDoc(collection(db, 'users', user.uid, 'agents'), payload);
+            if (deployMode === 'SINGLE') {
+                // Single agent deploy (original behavior)
+                await addDoc(collection(db, 'users', user.uid, 'agents'), basePayload);
+                navigate('/');
+            } else {
+                // Multiple agents deploy
+                const count = parseInt(numAgents);
+                if (count < 1 || count > 50) {
+                    throw new Error("Number of agents must be between 1 and 50");
+                }
 
-            navigate('/');
+                const deploymentGroupId = generateUUID();
+                const batch = writeBatch(db);
+
+                for (let i = 1; i <= count; i++) {
+                    const agentRef = doc(collection(db, 'users', user.uid, 'agents'));
+                    batch.set(agentRef, {
+                        ...basePayload,
+                        deploymentGroupId,
+                        deploymentIndex: i
+                    });
+                }
+
+                await batch.commit();
+                alert(`Successfully deployed ${count} agent${count > 1 ? 's' : ''}!`);
+                navigate('/');
+            }
         } catch (err) {
             console.error(err);
             setError('Failed to deploy agent: ' + err.message);
@@ -99,6 +133,55 @@ export default function DeployAgent() {
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-6">
+                    {/* Deploy Mode Toggle */}
+                    <div className="space-y-2">
+                        <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider ml-1">Deploy Mode</label>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setDeployMode('SINGLE')}
+                                className={`px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
+                                    deployMode === 'SINGLE'
+                                        ? 'bg-blue-600 border-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]'
+                                        : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
+                                }`}
+                            >
+                                Deploy Single Agent
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setDeployMode('MULTIPLE')}
+                                className={`px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
+                                    deployMode === 'MULTIPLE'
+                                        ? 'bg-blue-600 border-blue-500 text-white shadow-[0_0_15px_rgba(37,99,235,0.4)]'
+                                        : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white'
+                                }`}
+                            >
+                                Deploy Multiple Agents
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Number of Agents - Show only when MULTIPLE mode */}
+                    {deployMode === 'MULTIPLE' && (
+                        <div className="space-y-2">
+                            <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider ml-1">
+                                Number of Agents
+                            </label>
+                            <input
+                                type="number"
+                                value={numAgents}
+                                onChange={(e) => setNumAgents(Math.max(1, Math.min(50, parseInt(e.target.value) || 1)))}
+                                min="1"
+                                max="50"
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent transition-all"
+                            />
+                            <p className="text-gray-500 text-xs ml-1">
+                                Deploy {numAgents} identical agent{numAgents > 1 ? 's' : ''} (min 1, max 50)
+                            </p>
+                        </div>
+                    )}
+
                     <div className="space-y-2">
                         <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider ml-1">Target URL</label>
                         <input
@@ -259,7 +342,7 @@ export default function DeployAgent() {
                             disabled={loading}
                             className="w-full bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-bold py-4 rounded-xl shadow-[0_10px_20px_-5px_rgba(37,99,235,0.4)] hover:shadow-[0_20px_40px_-10px_rgba(37,99,235,0.6)] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed border-t border-white/20"
                         >
-                            {loading ? 'Deploying...' : 'Deploy Agent'}
+                            {loading ? 'Deploying...' : deployMode === 'MULTIPLE' ? `Deploy ${numAgents} Agent${numAgents > 1 ? 's' : ''}` : 'Deploy Agent'}
                         </button>
                     </div>
                 </form>
