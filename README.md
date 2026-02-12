@@ -1,6 +1,6 @@
-# Rotom Cart
+# Cart Rotom
 
-Rotom Cart is an agent-based stock monitoring system with a React frontend and Firebase backend. It allows users to deploy monitoring agents to track product availability and manage subscriptions via Stripe.
+Cart Rotom is an agent-based stock monitoring system with a React frontend and Firebase backend. It allows users to deploy monitoring agents to track product availability and manage subscriptions via Stripe.
 
 ## Prerequisites
 
