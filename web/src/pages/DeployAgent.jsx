@@ -7,6 +7,7 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 export default function DeployAgent() {
     const navigate = useNavigate();
     const [url, setUrl] = useState('');
+    const [alias, setAlias] = useState('');
     const [frequency, setFrequency] = useState('5');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -18,6 +19,7 @@ export default function DeployAgent() {
     const [condition, setCondition] = useState('EQUALS'); // EQUALS, NOT_EQUALS, CONTAINS
     const [expectedValue, setExpectedValue] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(false);
+    const [autoCheckout, setAutoCheckout] = useState(false);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -41,12 +43,14 @@ export default function DeployAgent() {
             // Construct payload based on check type
             const payload = {
                 url,
+                alias: alias || new URL(url).hostname, // Use alias if provided, fallback to hostname
                 frequency: parseInt(frequency),
                 status: 'ENABLED', // Defaults to ENABLED now
                 createdAt: serverTimestamp(),
                 lastChecked: null,
                 name: new URL(url).hostname,
-                checkType
+                checkType,
+                autoCheckout
             };
 
             if (checkType === 'SELECTOR') {
@@ -105,6 +109,18 @@ export default function DeployAgent() {
                             className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent transition-all"
                             required
                         />
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider ml-1">Agent Name (Alias)</label>
+                        <input
+                            type="text"
+                            value={alias}
+                            onChange={(e) => setAlias(e.target.value)}
+                            placeholder="e.g., Nike Shoes Stock Tracker"
+                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent transition-all"
+                        />
+                        <p className="text-gray-500 text-xs ml-1">Leave blank to auto-use the domain name</p>
                     </div>
 
                     <div className="space-y-2">
@@ -218,6 +234,24 @@ export default function DeployAgent() {
                         </div>
                     )}
 
+                    {/* Auto Checkout Toggle */}
+                    <div className="pt-2 border-t border-white/10">
+                        <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider ml-1 mb-3">Checkout Options</label>
+                        <div
+                            onClick={() => setAutoCheckout(!autoCheckout)}
+                            className="flex items-center justify-between p-3 bg-black/20 border border-white/10 rounded-xl cursor-pointer hover:bg-black/30 hover:border-white/20 transition-all"
+                        >
+                            <div>
+                                <span className="text-gray-300 font-medium block">Auto Checkout When In Stock</span>
+                                <span className="text-gray-500 text-xs">Currently disabled for testing</span>
+                            </div>
+                            <div className={`w-6 h-6 rounded border flex items-center justify-center transition-all flex-shrink-0 ${autoCheckout ? 'bg-blue-600 border-blue-500' : 'border-white/20'}`}>
+                                {autoCheckout && (
+                                    <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+                                )}
+                            </div>
+                        </div>
+                    </div>
 
                     <div className="pt-4">
                         <button

@@ -4,7 +4,8 @@ const { logger } = require("firebase-functions");
 const admin = require("firebase-admin");
 const axios = require("axios");
 const cheerio = require("cheerio");
-const puppeteer = require("puppeteer");
+const puppeteer = require("puppeteer-core");
+const chromium = require("@sparticuz/chromium");
 
 
 admin.initializeApp();
@@ -208,15 +209,12 @@ async function checkStock(userId, agentId, agent) {
 }
 
 async function fetchWithPuppeteer(url) {
-    logger.info(`Launching Puppeteer for ${url}`);
+    logger.info(`Launching Puppeteer with Chromium for ${url}`);
     const browser = await puppeteer.launch({
-        headless: "new",
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu'
-        ]
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless
     });
     const page = await browser.newPage();
 
