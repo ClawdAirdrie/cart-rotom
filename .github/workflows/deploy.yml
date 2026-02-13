@@ -24,44 +24,36 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'web/functions/package-lock.json'
       
-      - name: Setup Google Cloud credentials
+      - name: Create Service Account Key File
+        env:
+          SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
         run: |
+          # Create the folder
           mkdir -p $HOME/.config/gcloud
-          # Write the service account key to a temp file first
-          echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}" > $HOME/.config/gcloud/service-account-key.json
           
-          # Validate the JSON is valid
-          if ! python3 -c "import json; json.load(open('$HOME/.config/gcloud/service-account-key.json'))" 2>/dev/null; then
-            echo "❌ ERROR: FIREBASE_SERVICE_ACCOUNT_KEY is not valid JSON!"
-            echo "Please verify the secret contains the complete JSON from your service account key file"
-            echo "The JSON should start with { and end with }"
-            exit 1
-          fi
+          # Write the JSON to the file with proper quoting to preserve structure
+          # The double quotes "$SERVICE_ACCOUNT_JSON" tell the shell:
+          # "Treat everything inside as a single string, don't interpret special chars"
+          echo "$SERVICE_ACCOUNT_JSON" > $HOME/.config/gcloud/service-account-key.json
           
-          # Verify the file exists and is readable
+          # Verify the file was created
           if [ ! -f "$HOME/.config/gcloud/service-account-key.json" ]; then
             echo "❌ ERROR: Failed to create service account key file"
             exit 1
           fi
           
+          # Validate the JSON is valid
+          if ! python3 -c "import json; json.load(open('$HOME/.config/gcloud/service-account-key.json'))" 2>/dev/null; then
+            echo "❌ ERROR: Service account key is not valid JSON!"
+            echo "Please verify you copied the complete JSON from your service account key file"
+            echo "The JSON should start with { and end with }"
+            exit 1
+          fi
+          
           echo "✅ Service account key file created and validated"
+          
+          # Tell Google Cloud SDK where to find the credentials for all future steps
           echo "GOOGLE_APPLICATION_CREDENTIALS=$HOME/.config/gcloud/service-account-key.json" >> $GITHUB_ENV
-      
-      - name: Verify secrets are set
-        run: |
-          if [ -z "${{ secrets.FIREBASE_PROJECT_ID }}" ]; then
-            echo "❌ ERROR: FIREBASE_PROJECT_ID secret is not set!"
-            echo "Please go to Settings → Secrets and variables → Actions"
-            echo "Add secret: FIREBASE_PROJECT_ID with your Firebase project ID"
-            exit 1
-          fi
-          if [ -z "${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}" ]; then
-            echo "❌ ERROR: FIREBASE_SERVICE_ACCOUNT_KEY secret is not set!"
-            echo "Please go to Settings → Secrets and variables → Actions"
-            echo "Add secret: FIREBASE_SERVICE_ACCOUNT_KEY with your service account JSON"
-            exit 1
-          fi
-          echo "✅ Secrets are configured"
       
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
@@ -70,19 +62,6 @@ jobs:
         run: |
           cd web/functions
           npm install
-      
-      - name: Verify Firebase authentication
-        run: |
-          # Test that Firebase can authenticate with the service account
-          if ! firebase projects:list --project "${{ secrets.FIREBASE_PROJECT_ID }}" &>/dev/null; then
-            echo "❌ ERROR: Firebase authentication failed!"
-            echo "Possible causes:"
-            echo "1. Service account key is invalid or malformed"
-            echo "2. Service account doesn't have Cloud Functions Developer role"
-            echo "3. Project ID is incorrect"
-            exit 1
-          fi
-          echo "✅ Firebase authentication successful"
       
       - name: Deploy to Firebase
         run: |
