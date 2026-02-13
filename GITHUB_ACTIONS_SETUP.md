@@ -51,8 +51,11 @@ When you merge a PR to `main`, GitHub Actions will automatically:
    - Click **Add secret**
 4. Add a second secret for your Firebase Project ID:
    - **Name**: `FIREBASE_PROJECT_ID`
-   - **Value**: Your Firebase project ID (found in [Firebase Console](https://console.firebase.google.com/) → Project Settings)
+   - **Value**: Your Firebase **Project ID** (e.g., `cart-rotom`, NOT the project number)
+   - Find it in [Firebase Console](https://console.firebase.google.com/) → **Project Settings** (gear icon) → Copy **Project ID**
    - Click **Add secret**
+   
+   ⚠️ **Important**: Use the **Project ID** (e.g., "cart-rotom"), not the **Project Number** (a long number)
 
 ### Step 4: Verify Setup
 
@@ -149,13 +152,45 @@ The workflow runs when:
 2. If truly hanging, check Firebase Console for stuck operations
 3. Can manually cancel the workflow in the **Actions** tab
 
-### "Invalid service account key"
+### "Invalid service account key" / "is not valid JSON"
 **Problem**: JSON key is malformed or incomplete  
 **Solution**:
 1. Download a fresh service account key from Google Cloud Console
-2. Open it in a text editor and verify it's valid JSON
-3. Copy the **entire contents** (start with `{`, end with `}`)
-4. Update the GitHub secret with the new contents
+2. Open it in a text editor and verify:
+   - It starts with `{`
+   - It ends with `}`
+   - It's valid JSON (no missing quotes or commas)
+3. Copy the **entire file contents** - make sure you get everything from start to finish
+4. Go to GitHub → Settings → Secrets → Edit `FIREBASE_SERVICE_ACCOUNT_KEY`
+5. Replace the entire value with the new JSON
+6. Click **Update secret**
+
+**Note**: The secret should look like:
+```json
+{
+  "type": "service_account",
+  "project_id": "your-project-id",
+  "private_key_id": "...",
+  ...
+}
+```
+
+### "Failed to authenticate" after secrets check passes
+**Problem**: Service account credentials aren't working  
+**Solution**:
+1. Verify the service account has **Cloud Functions Developer** role:
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - **IAM & Admin → IAM**
+   - Find `github-actions@...` service account
+   - Verify it has **Cloud Functions Developer** role
+   - If missing, click the pencil, **Add Role**, select **Cloud Functions Developer**
+
+2. Try downloading a NEW service account key and updating the GitHub secret:
+   - Delete the old key in Google Cloud
+   - Create a new key (JSON format)
+   - Replace the GitHub secret with the new key contents
+
+3. Verify your **FIREBASE_PROJECT_ID** is the **Project ID** (like `cart-rotom`), not the project number
 
 ## Manual Deployment (Fallback)
 
