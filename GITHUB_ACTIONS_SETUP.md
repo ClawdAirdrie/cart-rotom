@@ -1,50 +1,60 @@
 # GitHub Actions CI/CD Setup Guide
 
-This guide walks you through setting up automatic Cloud Functions deployment via GitHub Actions.
+This guide walks you through setting up automatic Cloud Functions deployment via GitHub Actions using a Firebase Service Account.
 
 ## Overview
 
 When you merge a PR to `main`, GitHub Actions will automatically:
 1. Check out the code
 2. Install dependencies
-3. Authenticate with Firebase
+3. Authenticate with Google Cloud Service Account
 4. Deploy Cloud Functions to production
 
 ## Setup Instructions
 
-### Step 1: Get Your Firebase CI Token
+### Step 1: Create a Firebase Service Account
 
-Run this command in your terminal (you must be authenticated with Firebase):
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Make sure your **Firebase project** is selected (top-left dropdown)
+3. Navigate to **IAM & Admin → Service Accounts**
+4. Click **Create Service Account**
+5. Fill in:
+   - **Service account name**: `github-actions` (or similar)
+   - **Service account ID**: Auto-generated
+   - **Description**: `GitHub Actions deployment account`
+6. Click **Create and Continue**
+7. In "Grant this service account access to project":
+   - Click **Select a role**
+   - Search for `Cloud Functions Developer`
+   - Click to select it
+   - Click **Continue**
+8. Click **Done**
 
-```bash
-firebase login:ci
-```
+### Step 2: Create and Download Service Account Key
 
-This will:
-- Open a browser window
-- Ask you to log in to Firebase
-- Generate a **CI token** (looks like a long string)
-- Display the token in your terminal
+1. In the Service Accounts list, click the **github-actions** account you just created
+2. Go to the **Keys** tab
+3. Click **Add Key → Create new key**
+4. Select **JSON**
+5. Click **Create**
+6. A JSON file will download automatically - **save it somewhere safe**
 
-**⚠️ Important**: This token has production access. Treat it like a password!
+**⚠️ Important**: This file contains credentials. Never commit it to git!
 
-### Step 2: Add GitHub Secrets
+### Step 3: Add GitHub Secret
 
 1. Go to your GitHub repo: **Settings → Secrets and variables → Actions**
 2. Click **New repository secret**
-3. Add two secrets:
+3. Fill in:
+   - **Name**: `FIREBASE_SERVICE_ACCOUNT_KEY`
+   - **Value**: Open the JSON file you downloaded in Step 2, copy the **entire contents**, and paste it here
+   - Click **Add secret**
+4. Add a second secret for your Firebase Project ID:
+   - **Name**: `FIREBASE_PROJECT_ID`
+   - **Value**: Your Firebase project ID (found in [Firebase Console](https://console.firebase.google.com/) → Project Settings)
+   - Click **Add secret**
 
-#### Secret 1: FIREBASE_CI_TOKEN
-- **Name**: `FIREBASE_CI_TOKEN`
-- **Value**: Paste the token from Step 1
-- Click **Add secret**
-
-#### Secret 2: FIREBASE_PROJECT_ID
-- **Name**: `FIREBASE_PROJECT_ID`
-- **Value**: Your Firebase project ID (found in Firebase Console → Project Settings)
-- Click **Add secret**
-
-### Step 3: Verify Setup
+### Step 4: Verify Setup
 
 1. Make a small change to any file in `web/functions/`
 2. Create a PR to `main`
@@ -73,10 +83,16 @@ The workflow runs when:
 
 ## Security Best Practices
 
-✅ **Token Storage**
-- CI token stored as GitHub secret (encrypted)
+✅ **Service Account Key**
+- JSON key stored as encrypted GitHub secret
 - Only accessible to GitHub Actions
-- Never commit tokens to git
+- Never commit keys to git
+- Credentials only used during deployment, cleaned up after
+
+✅ **Least Privilege**
+- Service account only has `Cloud Functions Developer` role
+- Cannot delete projects, databases, or other resources
+- Limited to Cloud Functions operations only
 
 ✅ **Project ID**
 - Stored separately for easy rotation
@@ -86,16 +102,27 @@ The workflow runs when:
 - Only runs on pushes to `main`
 - Cannot be triggered by PRs from forks
 - Deployment logs visible to team members
+- Service account can be rotated anytime
 
 ## Troubleshooting
 
-### "Unauthorized" Error in Deployment
-**Problem**: Token is invalid or expired  
+### "Unauthorized" or "Permission denied" Error
+**Problem**: Service account doesn't have access  
 **Solution**: 
-1. Go to GitHub **Settings → Secrets**
-2. Delete `FIREBASE_CI_TOKEN`
-3. Run `firebase login:ci` again
-4. Add the new token as a secret
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Navigate to **IAM & Admin → IAM**
+3. Find the **github-actions** service account
+4. Click the pencil icon to edit
+5. Verify it has **Cloud Functions Developer** role
+6. If missing, click **Add Role** and select it
+
+### "GOOGLE_APPLICATION_CREDENTIALS not found"
+**Problem**: Missing `FIREBASE_SERVICE_ACCOUNT_KEY` secret  
+**Solution**:
+1. Go to GitHub **Settings → Secrets and variables → Actions**
+2. Verify `FIREBASE_SERVICE_ACCOUNT_KEY` exists
+3. If missing, follow Step 2-3 of setup instructions
+4. Paste the entire JSON from the service account key file
 
 ### Deployment Not Triggering
 **Problem**: Workflow doesn't run on merge  
@@ -103,7 +130,9 @@ The workflow runs when:
 1. Verify you're pushing to `main` (not `master`)
 2. Confirm changes are in `web/functions/` directory
 3. Check **Actions** tab for workflow runs
-4. Verify `FIREBASE_CI_TOKEN` and `FIREBASE_PROJECT_ID` are set
+4. Verify both secrets are set:
+   - `FIREBASE_SERVICE_ACCOUNT_KEY`
+   - `FIREBASE_PROJECT_ID`
 
 ### "Project ID not set" Error
 **Problem**: Missing `FIREBASE_PROJECT_ID` secret  
@@ -120,16 +149,31 @@ The workflow runs when:
 2. If truly hanging, check Firebase Console for stuck operations
 3. Can manually cancel the workflow in the **Actions** tab
 
+### "Invalid service account key"
+**Problem**: JSON key is malformed or incomplete  
+**Solution**:
+1. Download a fresh service account key from Google Cloud Console
+2. Open it in a text editor and verify it's valid JSON
+3. Copy the **entire contents** (start with `{`, end with `}`)
+4. Update the GitHub secret with the new contents
+
 ## Manual Deployment (Fallback)
 
 If GitHub Actions fails or you need to deploy immediately:
 
 ```bash
+# Option 1: Use your local Firebase login
+firebase login
 cd web/functions
 firebase deploy --only functions
+
+# Option 2: Use the service account JSON
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
+cd web/functions
+firebase deploy --only functions --project YOUR_PROJECT_ID
 ```
 
-This will use your local Firebase authentication.
+Replace `/path/to/service-account-key.json` with the path to your downloaded JSON file.
 
 ## Monitoring Deployments
 
@@ -138,25 +182,40 @@ This will use your local Firebase authentication.
 2. Click the workflow run
 3. Click **deploy** job
 4. Expand each step to see detailed logs
+5. You'll see:
+   - Node.js setup and caching
+   - Firebase CLI installation
+   - Dependency installation
+   - Deployment progress
+   - Success/failure message
 
 ### Firebase Console
 Check [Firebase Console](https://console.firebase.google.com/) under:
-- **Functions** → See deployed functions
+- **Functions** → See deployed functions with latest deployment time
 - **Cloud Functions** logs to verify execution
+- **Logs** → View application logs from your functions
 
 ## Advanced: Environment-Specific Deployments
 
 To deploy to different Firebase projects (staging vs production), you can:
 
-1. Create multiple secrets:
-   - `FIREBASE_CI_TOKEN_PROD`
-   - `FIREBASE_CI_TOKEN_STAGING`
+1. Create service accounts in each project and download their keys
+2. Create multiple secrets in GitHub:
+   - `FIREBASE_SERVICE_ACCOUNT_KEY_PROD`
+   - `FIREBASE_SERVICE_ACCOUNT_KEY_STAGING`
+   - `FIREBASE_PROJECT_ID_PROD`
+   - `FIREBASE_PROJECT_ID_STAGING`
 
-2. Use conditional workflow steps:
+3. Create separate workflows or use conditional steps:
    ```yaml
-   - name: Deploy to Production
+   - name: Deploy to Production (Main)
      if: github.ref == 'refs/heads/main'
-     run: firebase deploy --only functions --token "${{ secrets.FIREBASE_CI_TOKEN_PROD }}"
+     env:
+       GOOGLE_APPLICATION_CREDENTIALS: /tmp/prod-key.json
+     run: |
+       echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY_PROD }}" > /tmp/prod-key.json
+       cd web/functions
+       firebase deploy --only functions --project "${{ secrets.FIREBASE_PROJECT_ID_PROD }}"
    ```
 
 ## What Gets Deployed
