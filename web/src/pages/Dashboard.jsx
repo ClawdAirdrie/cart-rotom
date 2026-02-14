@@ -5,6 +5,7 @@ import { signOut } from 'firebase/auth'
 import { useAuth } from '../contexts/AuthContext'
 import { collection, query, onSnapshot, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { useNavigate } from 'react-router-dom'
+import Pokeball from '../components/Pokeball'
 
 export default function Dashboard() {
     const { currentUser } = useAuth()
@@ -141,10 +142,9 @@ export default function Dashboard() {
             {/* Apple-inspired liquid glass header */}
             <header className="relative z-10 mb-12 flex justify-between items-center bg-white/[0.05] backdrop-blur-[20px] border border-white/[0.08] rounded-[20px] px-8 py-5 shadow-lg">
                 {/* Logo placeholder on left */}
-                <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-white/[0.08] border border-white/[0.12] flex items-center justify-center text-white/60">
-                        {/* Logo will be added here */}
-                        🔷
+                <div className="flex items-center gap-6 flex-1">
+                    <div className="w-10 h-10 flex items-center justify-center flex-shrink-0">
+                        <Pokeball size={40} />
                     </div>
                     {currentUser && <p className="text-gray-400 text-xs font-medium tracking-wide hidden sm:block">
                         <span className="text-white/60">{currentUser.email}</span>
