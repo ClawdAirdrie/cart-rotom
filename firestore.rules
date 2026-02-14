@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default: Deny all access
+    // This is the "deny by default" security principle
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Users can only read/write their own user document and subcollections
+    match /users/{userId} {
+      // User can read and write their own document
+      allow read, write: if request.auth.uid == userId;
+
+      // User can read and write all their subcollections (agents, paymentMethods, etc)
+      match /{document=**} {
+        allow read, write: if request.auth.uid == userId;
+      }
+    }
+  }
+}

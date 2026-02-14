@@ -489,6 +489,26 @@ exports.saveWebhook = onCall(async (request) => {
     const userId = auth.uid;
 
     try {
+        // Input validation
+        if (webhookUrl) {
+            if (typeof webhookUrl !== 'string') {
+                throw new Error('Webhook URL must be a string');
+            }
+            if (webhookUrl.length > 2048) {
+                throw new Error('Webhook URL is too long (max 2048 characters)');
+            }
+            if (webhookUrl.length < 10) {
+                throw new Error('Webhook URL is too short');
+            }
+            
+            // Validate it's a valid URL
+            try {
+                new URL(webhookUrl);
+            } catch {
+                throw new Error('Invalid webhook URL format');
+            }
+        }
+
         // Encrypt webhook URL
         const encryptedWebhookUrl = webhookUrl ? encrypt(webhookUrl) : null;
 
@@ -622,6 +642,40 @@ exports.addPaymentMethod = onCall(async (request) => {
     const userId = auth.uid;
 
     try {
+        // Input validation
+        if (!cardNumber || !cvc || !expiry || !cardholderName) {
+            throw new Error("All card fields are required");
+        }
+        
+        // Validate card number format (13-19 digits)
+        const cleanCardNumber = String(cardNumber).replace(/\s/g, '');
+        if (!/^\d{13,19}$/.test(cleanCardNumber)) {
+            throw new Error("Invalid card number - must be 13-19 digits");
+        }
+        
+        // Validate CVC (3-4 digits)
+        if (!/^\d{3,4}$/.test(String(cvc))) {
+            throw new Error("Invalid CVC - must be 3-4 digits");
+        }
+        
+        // Validate expiry format (MM/YY)
+        if (!/^\d{2}\/\d{2}$/.test(String(expiry))) {
+            throw new Error("Invalid expiry format - use MM/YY");
+        }
+        
+        // Validate cardholder name length
+        if (String(cardholderName).length > 100) {
+            throw new Error("Cardholder name too long (max 100 characters)");
+        }
+        
+        // Validate balance if prepaid
+        if (isPrepaid) {
+            const bal = parseFloat(balance);
+            if (isNaN(bal) || bal < 0 || bal > 999999.99) {
+                throw new Error("Invalid balance - must be between 0 and 999999.99");
+            }
+        }
+
         // Encrypt card data
         const encryptedCard = encryptCardData({
             cardNumber,
@@ -777,8 +831,15 @@ exports.saveTelegram = onCall(async (request) => {
     const userId = auth.uid;
 
     try {
+        // Input validation
         if (!telegramUserId) {
             throw new Error("Telegram user ID is required");
+        }
+        
+        // Telegram user IDs must be positive integers
+        const id = parseInt(telegramUserId, 10);
+        if (!Number.isInteger(id) || id <= 0 || id > Number.MAX_SAFE_INTEGER) {
+            throw new Error("Invalid Telegram user ID - must be a positive number");
         }
 
         // Save Telegram config to Firestore
@@ -814,8 +875,15 @@ exports.testTelegram = onCall(async (request) => {
     const userId = auth.uid;
 
     try {
+        // Input validation
         if (!telegramUserId) {
             throw new Error("Telegram user ID is required");
+        }
+        
+        // Telegram user IDs must be positive integers
+        const id = parseInt(telegramUserId, 10);
+        if (!Number.isInteger(id) || id <= 0 || id > Number.MAX_SAFE_INTEGER) {
+            throw new Error("Invalid Telegram user ID - must be a positive number");
         }
 
         // Get Telegram bot token from Google Cloud Secret Manager
@@ -831,7 +899,7 @@ exports.testTelegram = onCall(async (request) => {
         // Send test message
         const url = `https://api.telegram.org/bot${telegramBotToken}/sendMessage`;
         await axios.post(url, {
-            chat_id: telegramUserId,
+            chat_id: id,  // Use validated integer
             text: "🧪 *Cart Rotom Test Notification*\n\nYour Telegram connection is working! ✅",
             parse_mode: "Markdown"
         }, {
