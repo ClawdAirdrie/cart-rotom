@@ -23,15 +23,14 @@ export default function Pokeball({ size = 40 }) {
         {/* Bottom white half */}
         <path d="M 0 50 A 50 50 0 0 1 100 50 L 100 100 Q 50 100 0 100 Z" fill="white" />
 
-        {/* Center band */}
-        <line x1="0" y1="50" x2="100" y2="50" stroke="black" strokeWidth="3" />
+        {/* Wider center band (black divider) */}
+        <rect x="0" y="44" width="100" height="12" fill="black" />
 
-        {/* Center white circle with red border */}
-        <circle cx="50" cy="50" r="18" fill="white" stroke="black" strokeWidth="2" />
-        <circle cx="50" cy="50" r="14" fill="#EF5350" stroke="black" strokeWidth="2" />
+        {/* Center white circle with black border */}
+        <circle cx="50" cy="50" r="16" fill="white" stroke="black" strokeWidth="2" />
 
-        {/* Center dot (button) */}
-        <circle cx="50" cy="50" r="8" fill="white" stroke="black" strokeWidth="1.5" />
+        {/* Center button dot */}
+        <circle cx="50" cy="50" r="7" fill="black" />
       </svg>
     </div>
   );

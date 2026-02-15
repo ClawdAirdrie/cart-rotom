@@ -143,7 +143,7 @@ export default function Dashboard() {
             <header className="relative z-10 mb-12 flex justify-between items-center bg-white/[0.05] backdrop-blur-[20px] border border-white/[0.08] rounded-[20px] px-8 py-5 shadow-lg">
                 {/* Logo placeholder on left */}
                 <div className="flex items-center gap-6 flex-1">
-                    <div className="w-10 h-10 flex items-center justify-center flex-shrink-0">
+                    <div className="w-10 h-10 flex items-center justify-center flex-shrink-0 mr-4">
                         <Pokeball size={40} />
                     </div>
                     {currentUser && <p className="text-gray-400 text-xs font-medium tracking-wide hidden sm:block">
