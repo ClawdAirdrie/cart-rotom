@@ -1,6 +1,7 @@
 
 // GitHub Actions automatic deployment is now configured
 // Merges to main will automatically trigger Cloud Functions deployment
+// GitHub Actions Service Account has access to TELEGRAM_BOT_TOKEN secret
 
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onCall } = require("firebase-functions/v2/https");
