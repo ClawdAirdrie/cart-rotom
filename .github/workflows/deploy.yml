@@ -63,6 +63,39 @@ jobs:
           cd web/functions
           npm install
       
+      - name: Verify TELEGRAM_BOT_TOKEN Secret Exists
+        run: |
+          echo "🔍 Checking for TELEGRAM_BOT_TOKEN secret in Google Cloud Secret Manager..."
+          
+          if gcloud secrets describe TELEGRAM_BOT_TOKEN --project "${{ secrets.FIREBASE_PROJECT_ID }}" > /dev/null 2>&1; then
+            echo "✅ TELEGRAM_BOT_TOKEN secret found"
+            
+            # Also check if the secret has a version (has actual data)
+            SECRET_VERSION=$(gcloud secrets describe TELEGRAM_BOT_TOKEN --project "${{ secrets.FIREBASE_PROJECT_ID }}" --format="value(labels.__LATEST_SECRET_VERSION__)")
+            if [ -z "$SECRET_VERSION" ]; then
+              # Try alternate method to check if secret has data
+              gcloud secrets versions list TELEGRAM_BOT_TOKEN --project "${{ secrets.FIREBASE_PROJECT_ID }}" --limit=1 > /dev/null 2>&1
+              if [ $? -eq 0 ]; then
+                echo "✅ TELEGRAM_BOT_TOKEN has valid versions"
+              else
+                echo "⚠️  WARNING: TELEGRAM_BOT_TOKEN secret exists but has no versions"
+              fi
+            fi
+          else
+            echo "❌ ERROR: TELEGRAM_BOT_TOKEN secret not found in Google Cloud Secret Manager!"
+            echo ""
+            echo "Setup Instructions:"
+            echo "1. Go to Google Cloud Console > Secret Manager"
+            echo "2. Create a new secret named: TELEGRAM_BOT_TOKEN"
+            echo "3. Paste your Telegram bot token from @BotFather"
+            echo "4. Grant the Cloud Functions service account access (Secret Accessor role)"
+            echo ""
+            echo "Command to create secret (if you have gcloud CLI):"
+            echo "  echo 'YOUR_BOT_TOKEN' | gcloud secrets create TELEGRAM_BOT_TOKEN --data-file=-"
+            echo ""
+            exit 1
+          fi
+      
       - name: Deploy to Firebase
         run: |
           cd web/functions
