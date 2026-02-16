@@ -4,7 +4,7 @@
 // GitHub Actions Service Account has access to TELEGRAM_BOT_TOKEN secret
 
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onCall } = require("firebase-functions/v2/https");
+const { onCall, onRequest } = require("firebase-functions/v2/https");
 const { logger } = require("firebase-functions");
 const admin = require("firebase-admin");
 const axios = require("axios");
@@ -874,6 +874,54 @@ exports.disconnectTelegram = onCall(async (request) => {
     } catch (error) {
         logger.error(`Failed to disconnect Telegram for user ${userId}: ${error.message}`);
         throw new Error("Failed to disconnect Telegram");
+    }
+});
+
+/**
+ * Telegram Webhook Handler
+ * Receives messages from Telegram and responds to /start command
+ */
+exports.telegramWebhook = onRequest(async (request, response) => {
+    // Only accept POST requests
+    if (request.method !== 'POST') {
+        return response.status(400).send('Only POST requests accepted');
+    }
+
+    try {
+        const { message } = request.body;
+
+        // Ignore if no message
+        if (!message || !message.text) {
+            return response.status(200).send('OK');
+        }
+
+        const chatId = message.chat.id;
+        const text = message.text.trim();
+
+        logger.info(`Received Telegram message from chat ${chatId}: ${text}`);
+
+        // Only respond to /start command
+        if (text === '/start') {
+            // Get bot token from secret
+            const botToken = await getSecret('TELEGRAM_BOT_TOKEN');
+
+            // Send user their ID
+            const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+            await axios.post(url, {
+                chat_id: chatId,
+                text: `🎯 Your Telegram User ID:\n\n\`${chatId}\`\n\nPaste this ID into Cart Rotom Settings → Notifications → Telegram to connect your account!`,
+                parse_mode: 'Markdown'
+            });
+
+            logger.info(`Sent Telegram ID to chat ${chatId}`);
+        }
+
+        // Always return 200 OK to Telegram (prevents retries)
+        return response.status(200).send('OK');
+    } catch (error) {
+        logger.error(`Telegram webhook error: ${error.message}`);
+        // Still return 200 to prevent Telegram from retrying
+        return response.status(200).send('OK');
     }
 });
 
