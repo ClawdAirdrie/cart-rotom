@@ -48,23 +48,44 @@ firebase functions:secrets:set TELEGRAM_BOT_TOKEN
 firebase deploy --only functions
 ```
 
-## Step 3: Update and Deploy Code
+## Step 3: Deploy Code and Set Webhook
 
 ```bash
 cd web
-npm install  # Install new dependency (@google-cloud/secret-manager)
 firebase deploy --only functions
 ```
+
+After deployment, you'll see a URL like:
+```
+✔ Function URL: https://us-central1-[PROJECT-ID].cloudfunctions.net/telegramWebhook
+```
+
+Save that URL. Then set the Telegram webhook (run this command anywhere):
+
+```bash
+curl -X POST https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://us-central1-cart-rotom.cloudfunctions.net/telegramWebhook"}'
+```
+
+Replace:
+- `<YOUR_BOT_TOKEN>` with your token from BotFather
+- `us-central1-cart-rotom` with your actual Cloud Functions region and project
+
+You should get a response like: `{"ok":true,"result":true}`
 
 ## Step 4: Connect in Cart Rotom UI
 
 1. Open Cart Rotom Settings → Notifications tab
 2. Select **Telegram** as your notification method
-3. Instructions will tell you to message `@CartRotomBot`
-4. Send `/start` to the bot in Telegram
-5. The bot will reply with your **Telegram User ID**
-6. Paste that ID into Cart Rotom and click "Connect Telegram"
-7. Click "Test Telegram" to verify it works
+3. Open Telegram and find your bot `@CartRotomBot`
+4. Send `/start` command to the bot
+5. **The bot will instantly reply with your Telegram User ID** (looks like: `123456789`)
+6. Copy that number from Telegram
+7. Go back to Cart Rotom Settings → paste the ID into the "Telegram User ID" field
+8. Click **"Connect Telegram"**
+9. Click **"Test Telegram"** to verify everything works
+   - You should receive a test message in Telegram immediately
 
 ## How It Works
 
@@ -84,14 +105,34 @@ When an item you're monitoring goes in/out of stock:
 
 ## Troubleshooting
 
+### /start command doesn't reply with my ID
+- Verify webhook is set correctly: `gcloud functions describe telegramWebhook --region us-central1`
+- Check webhook URL: Replace `cart-rotom` in the URL with your actual Firebase project ID
+- Verify webhook is set: 
+  ```bash
+  curl https://api.telegram.org/bot<TOKEN>/getWebhookInfo
+  ```
+  Should show your webhook URL with `"ok": true`
+- Check logs: `firebase functions:log --follow` and send `/start` again
+
+### Webhook returns 404 error
+- Your Cloud Functions region might not be `us-central1`
+- Find the correct region in your Firebase Console → Functions
+- Update the webhook URL with the correct region:
+  ```bash
+  curl -X POST https://api.telegram.org/bot<TOKEN>/setWebhook \
+    -H "Content-Type: application/json" \
+    -d '{"url": "https://<REGION>-<PROJECT>.cloudfunctions.net/telegramWebhook"}'
+  ```
+
 ### "Telegram bot not configured" error
 - Verify `TELEGRAM_BOT_TOKEN` secret exists in Google Cloud Secret Manager
 - Check the Cloud Functions service account has **Secret Accessor** role
 - Redeploy: `firebase deploy --only functions`
 
 ### Test button doesn't send message
-- Verify your Telegram user ID is correct
-- Make sure you've started @CartRotomBot (`/start`)
+- Verify your Telegram user ID is correct (should be a number like `123456789`)
+- Make sure you've run `/start` and got your ID from the bot
 - Check Cloud Functions logs: `firebase functions:log`
 
 ### "Failed to retrieve secret" in logs
