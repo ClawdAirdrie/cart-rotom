@@ -63,32 +63,49 @@ jobs:
           cd web/functions
           npm install
       
+      - name: Verify Authentication Context
+        run: |
+          echo "🔐 Current Authentication Context:"
+          gcloud auth list
+          echo ""
+      
       - name: Verify TELEGRAM_BOT_TOKEN Secret Diagnostics
         run: |
           PROJECT_ID="${{ secrets.FIREBASE_PROJECT_ID }}"
           echo "🔍 Running Telegram Secret Diagnostics..."
-          echo "Project: $PROJECT_ID"
+          echo "Project ID: $PROJECT_ID"
           echo ""
           
-          # Step 1: Check if we can list secrets (requires Secret Manager Viewer role)
+          # Step 1: Check if we can list secrets
           echo "Step 1️⃣  Testing Secret Manager List access..."
-          if gcloud secrets list --project "$PROJECT_ID" > /dev/null 2>&1; then
-            echo "✅ Can list secrets (Secret Manager Viewer role OK)"
+          if output=$(gcloud secrets list --project "$PROJECT_ID" 2>&1); then
+            echo "✅ Can list secrets"
           else
             echo "❌ FAILED to list secrets!"
-            echo "   → Missing IAM role: Secret Manager Viewer (roles/secretmanager.viewer)"
-            echo "   → Fix: Grant github-actions@${PROJECT_ID}.iam.gserviceaccount.com the Secret Manager Viewer role"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Actual Error from Google:"
+            echo "$output"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "Common causes:"
+            echo "• API not enabled: gcloud services enable secretmanager.googleapis.com --project $PROJECT_ID"
+            echo "• Wrong Project ID: Check that \$FIREBASE_PROJECT_ID in GitHub Secrets matches your GCP Project ID (not Name or Number)"
+            echo "• IAM missing: Service account needs Secret Manager Viewer role"
             echo ""
             exit 1
           fi
           
-          # Step 2: Check if TELEGRAM_BOT_TOKEN secret exists (requires Viewer role)
+          # Step 2: Check if TELEGRAM_BOT_TOKEN secret exists
           echo ""
           echo "Step 2️⃣  Checking if TELEGRAM_BOT_TOKEN secret exists..."
-          if gcloud secrets describe TELEGRAM_BOT_TOKEN --project "$PROJECT_ID" > /dev/null 2>&1; then
+          if output=$(gcloud secrets describe TELEGRAM_BOT_TOKEN --project "$PROJECT_ID" 2>&1); then
             echo "✅ TELEGRAM_BOT_TOKEN secret found"
           else
             echo "❌ Secret not found: TELEGRAM_BOT_TOKEN"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Actual Error from Google:"
+            echo "$output"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo ""
             echo "Setup Instructions:"
             echo "1. Go to Google Cloud Console > Secret Manager"
@@ -96,37 +113,44 @@ jobs:
             echo "3. Name: TELEGRAM_BOT_TOKEN"
             echo "4. Value: Your Telegram bot token from @BotFather"
             echo "5. Click 'Create Secret'"
-            echo "6. Then grant access to: github-actions@${PROJECT_ID}.iam.gserviceaccount.com"
             echo ""
             exit 1
           fi
           
-          # Step 3: Check if secret has versions with data (requires Accessor role)
+          # Step 3: Check if secret has versions with data
           echo ""
           echo "Step 3️⃣  Checking if secret has data versions..."
-          if gcloud secrets versions list TELEGRAM_BOT_TOKEN --project "$PROJECT_ID" --limit=1 > /dev/null 2>&1; then
+          if output=$(gcloud secrets versions list TELEGRAM_BOT_TOKEN --project "$PROJECT_ID" --limit=1 2>&1); then
             echo "✅ TELEGRAM_BOT_TOKEN has valid versions"
           else
             echo "❌ FAILED to list secret versions!"
-            echo "   → Missing IAM role: Secret Accessor (roles/secretmanager.secretAccessor)"
-            echo "   → Fix: In Secret Manager, click TELEGRAM_BOT_TOKEN > Manage Roles"
-            echo "   → Add github-actions@${PROJECT_ID}.iam.gserviceaccount.com with Secret Accessor role"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Actual Error from Google:"
+            echo "$output"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "This usually means: Service account lacks Secret Accessor role"
+            echo "In Secret Manager, click TELEGRAM_BOT_TOKEN > Manage Roles > Add github-actions service account with Secret Accessor role"
             echo ""
             exit 1
           fi
           
-          # Step 4: Try to read the secret value (requires Accessor role)
+          # Step 4: Try to read the secret value
           echo ""
           echo "Step 4️⃣  Verifying we can read the secret value..."
-          if gcloud secrets versions access latest --secret="TELEGRAM_BOT_TOKEN" --project "$PROJECT_ID" > /dev/null 2>&1; then
-            echo "✅ Can read TELEGRAM_BOT_TOKEN value (Secret Accessor role OK)"
+          if output=$(gcloud secrets versions access latest --secret="TELEGRAM_BOT_TOKEN" --project "$PROJECT_ID" 2>&1); then
+            echo "✅ Can read TELEGRAM_BOT_TOKEN value"
             echo ""
-            echo "✨ All checks passed! Secret is properly configured."
+            echo "✨ All checks passed! Telegram secret is properly configured."
           else
             echo "❌ FAILED to read secret value!"
-            echo "   → Missing IAM role: Secret Accessor (roles/secretmanager.secretAccessor)"
-            echo "   → Fix: In Secret Manager, click TELEGRAM_BOT_TOKEN > Manage Roles"
-            echo "   → Add github-actions@${PROJECT_ID}.iam.gserviceaccount.com with Secret Accessor role"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "Actual Error from Google:"
+            echo "$output"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "This usually means: Service account lacks Secret Accessor role"
+            echo "Fix: In Secret Manager, click TELEGRAM_BOT_TOKEN > Manage Roles > Add github-actions service account with Secret Accessor role"
             echo ""
             exit 1
           fi
