@@ -79,6 +79,7 @@ async function checkStock(userId, agentId, agent) {
     try {
         let html;
         let responseStatus = 200;
+        let botDetected = false;
 
         try {
             const response = await axios.get(agent.url, {
@@ -90,68 +91,95 @@ async function checkStock(userId, agentId, agent) {
             html = response.data;
             responseStatus = response.status;
 
-            if (html.includes("Pardon Our Interruption") || html.includes("challenge-platform")) {
-                throw new Error("Blocked by anti-bot protection");
+            // Check for common WAF/bot-detection services
+            const botDetectionSignatures = [
+                { name: "Cloudflare", patterns: ["Pardon Our Interruption", "challenge-platform", "cf_clearance"] },
+                { name: "Incapsula", patterns: ["Incapsula", "incident_id", "_Incapsula_Resource", "distil_referrer"] },
+                { name: "AWS WAF", patterns: ["AWS WAF", "akamai_validation"] },
+                { name: "F5 BIG-IP", patterns: ["F5 BIG-IP", "BIG-IP"] }
+            ];
+
+            for (const detector of botDetectionSignatures) {
+                if (detector.patterns.some(pattern => html.includes(pattern))) {
+                    logger.warn(`Bot detection triggered for ${agent.url}: ${detector.name}`);
+                    botDetected = true;
+                    break;
+                }
             }
 
         } catch (axiosError) {
             logger.warn(`Axios failed for ${agent.url} (${axiosError.message}). Switching to Puppeteer.`);
-            html = await fetchWithPuppeteer(agent.url);
+            try {
+                html = await fetchWithPuppeteer(agent.url);
+            } catch (puppeteerError) {
+                logger.warn(`Puppeteer also failed for ${agent.url}: ${puppeteerError.message}`);
+                botDetected = true;
+            }
         }
 
-        const $ = cheerio.load(html);
+        const $ = cheerio.load(html || "");
 
         let isInStock = false;
         let logMessage = "";
+        let checkResult = "UNKNOWN";
 
-        // --- CHECK LOGIC ---
-        // 1. Selector Based (Advanced)
-        if (agent.checkType === 'SELECTOR' && agent.selector) {
-            const element = $(agent.selector);
-            const text = element.text().trim();
-            const value = element.val();
-            const content = text || value || "";
+        // If bot detection triggered, skip stock checks
+        if (botDetected) {
+            checkResult = "BOT_DETECTED";
+            logMessage = "Bot detection (WAF/anti-scraping) blocked access to page. Real stock status unknown.";
+            logger.warn(`${logMessage} | Agent: ${agentId}`);
+        } else {
+            // --- CHECK LOGIC ---
+            // 1. Selector Based (Advanced)
+            if (agent.checkType === 'SELECTOR' && agent.selector) {
+                const element = $(agent.selector);
+                const text = element.text().trim();
+                const value = element.val();
+                const content = text || value || "";
 
-            if (agent.condition === 'EQUALS') {
-                isInStock = content === agent.expectedValue;
-                logMessage = `Selector '${agent.selector}' content '${content}' equals '${agent.expectedValue}'`;
-            } else if (agent.condition === 'NOT_EQUALS') {
-                isInStock = content !== agent.expectedValue;
-                logMessage = `Selector '${agent.selector}' content '${content}' does NOT equal '${agent.expectedValue}'`;
-            } else if (agent.condition === 'CONTAINS') {
-                isInStock = content.includes(agent.expectedValue);
-                logMessage = `Selector '${agent.selector}' content '${content}' contains '${agent.expectedValue}'`;
-            } else {
-                // Default: Element exists
-                isInStock = element.length > 0;
-                logMessage = `Selector '${agent.selector}' exists`;
+                if (agent.condition === 'EQUALS') {
+                    isInStock = content === agent.expectedValue;
+                    logMessage = `Selector '${agent.selector}' content '${content}' equals '${agent.expectedValue}'`;
+                } else if (agent.condition === 'NOT_EQUALS') {
+                    isInStock = content !== agent.expectedValue;
+                    logMessage = `Selector '${agent.selector}' content '${content}' does NOT equal '${agent.expectedValue}'`;
+                } else if (agent.condition === 'CONTAINS') {
+                    isInStock = content.includes(agent.expectedValue);
+                    logMessage = `Selector '${agent.selector}' content '${content}' contains '${agent.expectedValue}'`;
+                } else {
+                    // Default: Element exists
+                    isInStock = element.length > 0;
+                    logMessage = `Selector '${agent.selector}' exists`;
+                }
             }
-        }
-        // 2. Keyword Present (Positive Match)
-        else if (agent.checkType === 'KEYWORD_PRESENT') {
-            const keywords = (agent.keywords || "add to cart, in stock").split(',').map(k => k.trim().toLowerCase());
-            const bodyText = $("body").text().toLowerCase();
+            // 2. Keyword Present (Positive Match)
+            else if (agent.checkType === 'KEYWORD_PRESENT') {
+                const keywords = (agent.keywords || "add to cart, in stock").split(',').map(k => k.trim().toLowerCase());
+                const bodyText = $("body").text().toLowerCase();
 
-            // In stock if ANY keyword is found
-            const found = keywords.find(k => bodyText.includes(k));
-            isInStock = !!found;
-            logMessage = found ? `Found keyword: '${found}'` : "No positive keywords found";
-        }
-        // 3. Keyword Missing (Negative Match - Default)
-        else {
-            const bodyText = $("body").text().toLowerCase();
-            const outOfStockKeywords = (agent.keywords || "out of stock, sold out, currently unavailable, notify me").split(',').map(k => k.trim().toLowerCase());
+                // In stock if ANY keyword is found
+                const found = keywords.find(k => bodyText.includes(k));
+                isInStock = !!found;
+                logMessage = found ? `Found keyword: '${found}'` : "No positive keywords found";
+            }
+            // 3. Keyword Missing (Negative Match - Default)
+            else {
+                const bodyText = $("body").text().toLowerCase();
+                const outOfStockKeywords = (agent.keywords || "out of stock, sold out, currently unavailable, notify me").split(',').map(k => k.trim().toLowerCase());
 
-            // In stock if NO negative keywords are found
-            const found = outOfStockKeywords.find(k => bodyText.includes(k));
-            isInStock = !found; // True if NOT found
-            logMessage = found ? `Found negative keyword: '${found}'` : "No negative keywords found (Assumed In Stock)";
+                // In stock if NO negative keywords are found
+                const found = outOfStockKeywords.find(k => bodyText.includes(k));
+                isInStock = !found; // True if NOT found
+                logMessage = found ? `Found negative keyword: '${found}'` : "No negative keywords found (Assumed In Stock)";
+            }
+            
+            checkResult = isInStock ? "IN_STOCK" : "OUT_OF_STOCK";
         }
 
         const timestamp = admin.firestore.Timestamp.now();
         const updates = {
             lastChecked: timestamp,
-            lastResult: isInStock ? "IN_STOCK" : "OUT_OF_STOCK",
+            lastResult: checkResult,
             lastHttpStatus: responseStatus
         };
 
@@ -228,31 +256,31 @@ async function checkStock(userId, agentId, agent) {
         }
 
         // Check if status changed
-        const currentStatus = isInStock ? "IN_STOCK" : "OUT_OF_STOCK";
         const previousStatus = agent.lastResult;
-        const statusChanged = previousStatus && previousStatus !== currentStatus;
+        const statusChanged = previousStatus && previousStatus !== checkResult;
 
         // Update Agent Status
         await agentRef.update(updates);
 
+        // Only fire webhooks for actual IN_STOCK/OUT_OF_STOCK, not BOT_DETECTED
         // Fire webhook if status changed or first time check
-        if (!previousStatus || statusChanged) {
+        if (checkResult !== "BOT_DETECTED" && (!previousStatus || statusChanged)) {
             await fireWebhook(userId, agentId, agent, isInStock);
         }
 
         // Log the result
         await agentRef.collection("logs").add({
             timestamp: timestamp,
-            result: currentStatus,
+            result: checkResult,
             message: logMessage,
             httpStatus: responseStatus
         });
 
-        logger.info(`Check complete for ${agentId}: ${currentStatus}`);
+        logger.info(`Check complete for ${agentId}: ${checkResult}${checkResult === "BOT_DETECTED" ? " ⚠️ " : ""}`);
 
-        // Fire webhook if status changed
-        if (statusChanged) {
-            logger.info(`Status changed for ${agentId}: ${previousStatus} → ${currentStatus}`);
+        // Fire webhook if status changed (but not BOT_DETECTED)
+        if (statusChanged && checkResult !== "BOT_DETECTED" && previousStatus !== "BOT_DETECTED") {
+            logger.info(`Status changed for ${agentId}: ${previousStatus} → ${checkResult}`);
             await fireWebhook(userId, agentId, agent, isInStock);
         }
 
