@@ -85,7 +85,27 @@ async function checkStock(userId, agentId, agent) {
         let html;
         let responseStatus = 200;
         let botDetected = false;
+        let usedPuppeteer = false;
 
+        // Helper to detect WAF/bot protection
+        function detectBotProtection(htmlContent) {
+            const botDetectionSignatures = [
+                { name: "Cloudflare", patterns: ["Pardon Our Interruption", "challenge-platform", "cf_clearance"] },
+                { name: "Incapsula", patterns: ["Incapsula", "incident_id", "_Incapsula_Resource", "distil_referrer"] },
+                { name: "AWS WAF", patterns: ["AWS WAF", "akamai_validation"] },
+                { name: "F5 BIG-IP", patterns: ["F5 BIG-IP", "BIG-IP"] }
+            ];
+
+            for (const detector of botDetectionSignatures) {
+                if (detector.patterns.some(pattern => htmlContent.includes(pattern))) {
+                    return detector.name;
+                }
+            }
+            return null;
+        }
+
+        let protectionDetected = null;
+        
         try {
             const response = await axios.get(agent.url, {
                 headers: {
@@ -96,28 +116,36 @@ async function checkStock(userId, agentId, agent) {
             html = response.data;
             responseStatus = response.status;
 
-            // Check for common WAF/bot-detection services
-            const botDetectionSignatures = [
-                { name: "Cloudflare", patterns: ["Pardon Our Interruption", "challenge-platform", "cf_clearance"] },
-                { name: "Incapsula", patterns: ["Incapsula", "incident_id", "_Incapsula_Resource", "distil_referrer"] },
-                { name: "AWS WAF", patterns: ["AWS WAF", "akamai_validation"] },
-                { name: "F5 BIG-IP", patterns: ["F5 BIG-IP", "BIG-IP"] }
-            ];
-
-            for (const detector of botDetectionSignatures) {
-                if (detector.patterns.some(pattern => html.includes(pattern))) {
-                    logger.warn(`Bot detection triggered for ${agent.url}: ${detector.name}`);
-                    botDetected = true;
-                    break;
-                }
+            // Check if axios response is actually blocked by WAF
+            protectionDetected = detectBotProtection(html);
+            if (protectionDetected) {
+                logger.warn(`Axios got WAF response (${protectionDetected}) for ${agent.url}. Trying Puppeteer with stealth.`);
+                // Don't give up yet - try Puppeteer as fallback
             }
 
         } catch (axiosError) {
-            logger.warn(`Axios failed for ${agent.url} (${axiosError.message}). Switching to Puppeteer.`);
+            logger.warn(`Axios failed for ${agent.url} (${axiosError.message}). Trying Puppeteer.`);
+            protectionDetected = "CONNECTION_FAILED";
+        }
+
+        // If axios gave us a WAF response or failed, try Puppeteer
+        if (protectionDetected) {
             try {
+                logger.info(`Attempting Puppeteer with stealth plugin for ${agent.url}`);
                 html = await fetchWithPuppeteer(agent.url);
+                usedPuppeteer = true;
+                
+                // Check if Puppeteer also hit WAF
+                const puppeteerProtection = detectBotProtection(html);
+                if (puppeteerProtection) {
+                    logger.warn(`Puppeteer also detected WAF (${puppeteerProtection}) for ${agent.url}`);
+                    botDetected = true;
+                } else {
+                    logger.info(`Puppeteer successfully bypassed protection for ${agent.url}`);
+                    botDetected = false;
+                }
             } catch (puppeteerError) {
-                logger.warn(`Puppeteer also failed for ${agent.url}: ${puppeteerError.message}`);
+                logger.warn(`Puppeteer failed for ${agent.url}: ${puppeteerError.message}`);
                 botDetected = true;
             }
         }
