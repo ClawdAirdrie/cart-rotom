@@ -11,8 +11,13 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 const puppeteer = require("puppeteer-core");
 const chromium = require("@sparticuz/chromium");
+const PuppeteerExtra = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const { encryptCardData, decryptCardData, encrypt, decrypt } = require("./cardEncryption");
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
+
+// Apply stealth plugin to puppeteer-core
+PuppeteerExtra.use(StealthPlugin());
 
 
 admin.initializeApp();
@@ -302,16 +307,54 @@ async function checkStock(userId, agentId, agent) {
 }
 
 async function fetchWithPuppeteer(url) {
-    logger.info(`Launching Puppeteer with Chromium for ${url}`);
-    const browser = await puppeteer.launch({
-        args: chromium.args,
-        defaultViewport: chromium.defaultViewport,
-        executablePath: await chromium.executablePath(),
-        headless: chromium.headless
-    });
-    const page = await browser.newPage();
-
+    logger.info(`Launching Puppeteer with Stealth Plugin for ${url}`);
+    let browser;
+    
     try {
+        // Launch with PuppeteerExtra + Stealth Plugin (Strategy 2)
+        browser = await PuppeteerExtra.launch({
+            args: chromium.args,
+            defaultViewport: { width: 1920, height: 1080 },
+            executablePath: await chromium.executablePath(),
+            headless: chromium.headless
+        });
+        
+        const page = await browser.newPage();
+
+        // Strategy 1: Enhanced Headers & Stealth Techniques
+        // Set realistic viewport (important for detection)
+        await page.setViewport({ width: 1920, height: 1080 });
+        
+        // Set realistic User Agent
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+        
+        // Set additional headers to appear like real browser
+        await page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Cache-Control': 'max-age=0',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Ch-Ua': '" Not A;Brand";v="99", "Chromium";v="121", "Google Chrome";v="121"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1'
+        });
+        
+        // Masquerade as real browser (webdriver property)
+        await page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            Object.defineProperty(navigator, 'vendor', { get: () => 'Google Inc.' });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+            Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+        });
+
         // Optimization: Block images, fonts, styles to save bandwidth & time
         await page.setRequestInterception(true);
         page.on('request', (req) => {
@@ -322,14 +365,26 @@ async function fetchWithPuppeteer(url) {
             }
         });
 
-        // Set a realistic User Agent
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        // Navigate with longer timeout and wait for network idle
+        // This helps with JavaScript-heavy sites
+        await page.goto(url, { 
+            waitUntil: 'networkidle2',  // Wait for network to be mostly idle
+            timeout: 40000  // Increased timeout for slow sites
+        });
+        
+        // Additional wait for dynamic content
+        await page.waitForTimeout(1000);
+        
         const html = await page.content();
+        logger.info(`Successfully fetched ${url} with Puppeteer + Stealth`);
         return html;
+    } catch (error) {
+        logger.warn(`Puppeteer fetch failed for ${url}: ${error.message}`);
+        throw new Error(`Puppeteer failed: ${error.message}`);
     } finally {
-        await browser.close();
+        if (browser) {
+            await browser.close();
+        }
     }
 }
 
